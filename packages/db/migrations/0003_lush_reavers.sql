@@ -1,0 +1,2 @@
+CREATE UNIQUE INDEX IF NOT EXISTS "insights_async_task_unique" ON "insights" USING btree (("generation_meta"->>'async_task_id')) WHERE "insights"."generation_meta" ? 'async_task_id';--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "light_extracts_source_record_unique" ON "light_extracts" USING btree ("source_record_id");

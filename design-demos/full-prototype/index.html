@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<title>找我 · FindMe 原型</title>
+<link rel="stylesheet" href="prototype.css">
+</head>
+<body>
+<div id="app"></div>
+<dialog id="drawer" class="drawer" aria-label="依据与反例"></dialog>
+<dialog id="modal" class="modal" aria-label="对话框"></dialog>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<button type="button" class="proto-fab" data-action="proto-toggle" aria-expanded="false" aria-controls="proto-panel">原型面板</button>
+<aside id="proto-panel" class="proto-panel" hidden aria-label="原型面板"></aside>
+<script src="data.js"></script>
+<script src="app.js"></script>
+<script src="views-understand.js"></script>
+<script src="views-explore.js"></script>
+<script src="views-me.js"></script>
+<script>start();</script>
+</body>
+</html>

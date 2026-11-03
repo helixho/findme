@@ -1,0 +1,768 @@
+[
+  {
+    "name": "当下",
+    "type": "reflection",
+    "items": [
+      {
+        "prompt": "如果今天可以重来一个片刻，你会选哪个?",
+        "format": "single_choice",
+        "options": ["重新听一次", "重新说一次", "重新做一次选择", "不想重来"]
+      },
+      {
+        "prompt": "此刻，你离「说出真正想说的话」有多远?",
+        "format": "likert_scale",
+        "options": ["离得还远", "偏远一些", "在中间", "近了一些", "几乎说了"]
+      },
+      {
+        "prompt": "最近常停在心里的，是哪一类?",
+        "format": "multi_choice",
+        "options": ["工作", "关系", "身体", "自己"]
+      },
+      {
+        "prompt": "还有什么想补一句的?",
+        "format": "free_text",
+        "options": []
+      }
+    ]
+  },
+  {
+    "name": "倾向",
+    "type": "preference",
+    "items": [
+      {
+        "prompt": "做决定时，你更靠?",
+        "format": "single_choice",
+        "options": ["想清楚利弊", "当下的感受", "看别人怎么做", "先拖一拖"]
+      },
+      {
+        "prompt": "和人相处，你更自在于?",
+        "format": "single_choice",
+        "options": ["一对一深聊", "热闹的群体", "独处", "看情况"]
+      },
+      {
+        "prompt": "面对没把握的事，你通常?",
+        "format": "single_choice",
+        "options": ["先收集信息", "先试了再说", "找人商量", "回避一下"]
+      },
+      {
+        "prompt": "一句话说说，你最近想更了解自己的哪一面?",
+        "format": "free_text",
+        "options": []
+      }
+    ]
+  },
+  {
+    "name": "精力与节奏",
+    "type": "preference",
+    "items": [
+      {
+        "prompt": "忙了一整天后，哪种方式更能让你恢复?",
+        "format": "single_choice",
+        "options": ["一个人安静待着", "找人说说话", "出门走走", "看心情"]
+      },
+      {
+        "prompt": "了解一件新事物时，你先想知道?",
+        "format": "single_choice",
+        "options": ["它具体怎么用", "它背后的原理", "它和我有什么关系", "别人怎么评价它"]
+      },
+      {
+        "prompt": "别人找你倾诉时，你的第一反应更接近?",
+        "format": "single_choice",
+        "options": ["先想怎么帮他解决", "先感受他的情绪", "先听完整再说", "有点不知所措"]
+      },
+      {
+        "prompt": "对计划被打乱这件事，你的真实感受?",
+        "format": "likert_scale",
+        "options": ["很难受", "有点烦", "无所谓", "有点兴奋", "求之不得"]
+      }
+    ]
+  },
+  {
+    "name": "地图与领地",
+    "type": "theory",
+    "source": "像现实一样思考:惊讶在地图,不在领地",
+    "domain": "我如何做选择",
+    "lens": "理性主义",
+    "intro": "用几道题看看:惊讶出现时,是哪张地图需要更新。",
+    "items": [
+      {
+        "prompt": "最近一次觉得「这不可能/不可思议」时，你的第一反应更接近?",
+        "format": "single_choice",
+        "options": ["觉得世界不对劲", "觉得自己可能看错了", "没什么感觉", "过后才想起来"]
+      },
+      {
+        "prompt": "写下那件「不可思议」的事。",
+        "format": "free_text",
+        "options": []
+      },
+      {
+        "prompt": "如果惊讶说明地图旧了，最可能旧在哪一块?",
+        "format": "single_choice",
+        "options": ["对自己的假设", "对某个人的假设", "对「事情该怎样」的假设", "说不清"]
+      },
+      {
+        "prompt": "「我可能是错的」——此刻说出这句话的难度?",
+        "format": "likert_scale",
+        "options": ["很难说出口", "有点难", "一般", "不太难", "很容易"]
+      }
+    ]
+  },
+  {
+    "name": "课题分离",
+    "type": "theory",
+    "source": "《被讨厌的勇气》:课题分离",
+    "domain": "我如何与他人相处",
+    "lens": "阿德勒心理学",
+    "intro": "把消耗拆开:哪些是你的课题,哪些只是你在替人扛。",
+    "items": [
+      {
+        "prompt": "最近最消耗你的一件人际困扰是什么?",
+        "format": "free_text",
+        "options": []
+      },
+      {
+        "prompt": "这件事的后果，最终由谁承担?",
+        "format": "single_choice",
+        "options": ["主要是我", "主要是对方", "我们都有", "说不清"]
+      },
+      {
+        "prompt": "你现在正在替谁扛着课题?",
+        "format": "multi_choice",
+        "options": ["家人", "同事或上级", "朋友", "没有在扛"]
+      },
+      {
+        "prompt": "把不属于你的那部分放回去——此刻的意愿?",
+        "format": "likert_scale",
+        "options": ["完全不想", "不太想", "说不好", "有点想", "现在就想"]
+      }
+    ]
+  },
+  {
+    "name": "重要问题",
+    "type": "theory",
+    "source": "汉明:你和你的研究",
+    "domain": "我如何做选择",
+    "lens": "重要问题",
+    "intro": "不问效率,先问方向:你最重要的问题有没有被真正放到桌面上。",
+    "items": [
+      {
+        "prompt": "你生活或工作里「最重要的那个问题」，你现在?",
+        "format": "single_choice",
+        "options": ["正在做它", "知道是什么,但没在做", "说不清它是什么", "从没这么想过"]
+      },
+      {
+        "prompt": "试着写下它——那个最重要的问题是什么?",
+        "format": "free_text",
+        "options": []
+      },
+      {
+        "prompt": "如果没在做它，哪个最接近真实原因?",
+        "format": "single_choice",
+        "options": ["时间被别的占满了", "还没准备好", "怕做不成", "也许我其实不想要它"]
+      },
+      {
+        "prompt": "为它腾出 10% 时间的意愿?",
+        "format": "likert_scale",
+        "options": ["完全不想", "不太想", "说不好", "有点想", "现在就想"]
+      }
+    ]
+  },
+  {
+    "name": "情绪觉察",
+    "type": "reflection",
+    "domain": "我如何理解情绪",
+    "lens": "情绪粒度",
+    "intro": "先不解释情绪,只把它说细一点。",
+    "items": [
+      {
+        "prompt": "如果用天气形容今天的情绪，更接近?",
+        "format": "single_choice",
+        "options": ["晴", "多云", "阴", "有雨", "说不清"]
+      },
+      {
+        "prompt": "此刻身体哪里有「感觉」?(紧、沉、热、空…)",
+        "format": "multi_choice",
+        "options": ["肩颈", "胸口", "胃", "头", "没特别感觉"]
+      },
+      {
+        "prompt": "此刻的平静程度?",
+        "format": "likert_scale",
+        "options": ["很乱", "有点乱", "还行", "比较静", "很静"]
+      },
+      {
+        "prompt": "如果这个情绪会说话，它想说什么?",
+        "format": "free_text",
+        "options": []
+      }
+    ]
+  },
+  {
+    "name": "情绪比事件更大时",
+    "type": "theory",
+    "source": "想法如何制造情绪:认知的 ABC",
+    "domain": "我如何理解情绪",
+    "lens": "CBT",
+    "intro": "把事件、解释和情绪拆开,看看中间那句话是什么。",
+    "items": [
+      {
+        "prompt": "最近哪次情绪,明显比事情本身更大?",
+        "format": "free_text",
+        "options": []
+      },
+      {
+        "prompt": "那一刻你脑中最像哪句话?",
+        "format": "single_choice",
+        "options": ["我不够好", "我又要失控了", "对方不在乎我", "事情肯定会变糟", "说不清"]
+      },
+      {
+        "prompt": "这个解释更像来自?",
+        "format": "single_choice",
+        "options": ["这次事件本身", "过去反复经历", "别人曾经说过的话", "我对自己的旧规则"]
+      },
+      {
+        "prompt": "如果只描述事实,不加解释,这件事会怎么写?",
+        "format": "free_text",
+        "options": []
+      }
+    ]
+  },
+  {
+    "name": "我正在替谁扛课题",
+    "type": "theory",
+    "source": "《被讨厌的勇气》:课题分离",
+    "domain": "我如何与他人相处",
+    "lens": "阿德勒心理学",
+    "intro": "把责任和关心分开,不急着变冷,先看清边界。",
+    "items": [
+      {
+        "prompt": "最近你最像在替谁负责?",
+        "format": "free_text",
+        "options": []
+      },
+      {
+        "prompt": "这件事最终的后果主要由谁承担?",
+        "format": "single_choice",
+        "options": ["主要是我", "主要是对方", "我们都有", "我分不清"]
+      },
+      {
+        "prompt": "你继续扛着它,最想避免什么?",
+        "format": "multi_choice",
+        "options": ["对方失望", "关系变差", "自己内疚", "事情失控", "别人评价"]
+      },
+      {
+        "prompt": "如果只拿回属于你的部分,你会做什么?",
+        "format": "free_text",
+        "options": []
+      }
+    ]
+  },
+  {
+    "name": "我如何靠近和退开",
+    "type": "theory",
+    "source": "依恋:我们如何与重要的人相连",
+    "domain": "我如何与他人相处",
+    "lens": "依恋理论",
+    "intro": "观察亲近与保护之间的摆动,不急着给自己贴类型。",
+    "items": [
+      {
+        "prompt": "关系里不安时,你更常先做什么?",
+        "format": "single_choice",
+        "options": ["靠近确认", "退开冷静", "假装没事", "变得挑剔", "看对象"]
+      },
+      {
+        "prompt": "最近一次想靠近又退开,发生了什么?",
+        "format": "free_text",
+        "options": []
+      },
+      {
+        "prompt": "你当时更需要?",
+        "format": "multi_choice",
+        "options": ["被回应", "被尊重边界", "被看见努力", "保留体面", "不被追问"]
+      },
+      {
+        "prompt": "如果那时能诚实说一句话,你会说什么?",
+        "format": "free_text",
+        "options": []
+      }
+    ]
+  },
+  {
+    "name": "我在哪些事上反复回避",
+    "type": "reflection",
+    "domain": "我如何理解长期模式",
+    "lens": "回避",
+    "intro": "回避不等于懒,它常常在替你挡掉某种代价。",
+    "items": [
+      {
+        "prompt": "最近反复拖开的那件事是什么?",
+        "format": "free_text",
+        "options": []
+      },
+      {
+        "prompt": "你最像在回避什么?",
+        "format": "multi_choice",
+        "options": ["失败", "冲突", "失望", "被评价", "开始后停不下来"]
+      },
+      {
+        "prompt": "每次回避之后,短期得到的是?",
+        "format": "single_choice",
+        "options": ["轻松一点", "保持安全", "避免尴尬", "争取时间", "没有好处"]
+      },
+      {
+        "prompt": "如果只做 10 分钟,最小的一步是什么?",
+        "format": "free_text",
+        "options": []
+      }
+    ]
+  },
+  {
+    "name": "我对自己的旧规则",
+    "type": "theory",
+    "source": "想法如何制造情绪:认知的 ABC",
+    "domain": "我如何看待自己",
+    "lens": "核心信念",
+    "intro": "把那些自动运转的旧规则拿出来看一眼。",
+    "items": [
+      {
+        "prompt": "你最常用哪类句子要求自己?",
+        "format": "single_choice",
+        "options": ["我必须更好", "我不能麻烦别人", "我不能失败", "我应该懂事", "我得掌控局面"]
+      },
+      {
+        "prompt": "这条规则最早像是从哪里来的?",
+        "format": "free_text",
+        "options": []
+      },
+      {
+        "prompt": "它现在更多是在保护你,还是限制你?",
+        "format": "likert_scale",
+        "options": ["几乎都在限制", "限制多一些", "说不清", "保护多一些", "几乎都在保护"]
+      },
+      {
+        "prompt": "如果把它改得更温和一点,会变成哪句话?",
+        "format": "free_text",
+        "options": []
+      }
+    ]
+  },
+  {
+    "name": "V1.3 控制内外复盘",
+    "type": "theory",
+    "source": "控制内外:先把责任放回合适的位置",
+    "domain": "我如何做选择",
+    "lens": "斯多葛主义",
+    "intro": "把一件正在牵动你的事拆成可控、不可控和下一步。",
+    "items": [
+      {
+        "itemKey": "q1",
+        "prompt": "这件事里,事实已经发生的部分是什么?",
+        "format": "free_text",
+        "options": []
+      },
+      {
+        "itemKey": "q2",
+        "prompt": "我正在试图控制的他人反应是什么?",
+        "format": "free_text",
+        "options": []
+      },
+      {
+        "itemKey": "q3",
+        "prompt": "真正由我负责的一小步是什么?",
+        "format": "free_text",
+        "options": []
+      }
+    ],
+    "sourceId": "stoicism_epictetus_gutenberg",
+    "sourceUrl": "https://www.gutenberg.org/ebooks/45109",
+    "licenseStatus": "public_domain",
+    "usableScope": "full_text_local_allowed",
+    "evidenceRefs": ["ch001#ck001"],
+    "corpusGeneratedAt": "2026-06-25",
+    "reviewStatus": "content_ready"
+  },
+  {
+    "name": "V1.3 写给自己的笔记",
+    "type": "theory",
+    "source": "《沉思录》:把每天当成一次自我校准",
+    "domain": "我如何要求自己",
+    "lens": "斯多葛主义",
+    "intro": "用一页私人笔记整理今天的自我要求。",
+    "items": [
+      {
+        "itemKey": "q1",
+        "prompt": "今天我对自己最强的一条要求是什么?",
+        "format": "free_text",
+        "options": []
+      },
+      {
+        "itemKey": "q2",
+        "prompt": "这条要求帮助了我,还是消耗了我?",
+        "format": "single_choice",
+        "options": ["更帮助我", "更消耗我", "两者都有", "还看不清"]
+      },
+      {
+        "itemKey": "q3",
+        "prompt": "如果把它改写成一句温和提醒,会是什么?",
+        "format": "free_text",
+        "options": []
+      }
+    ],
+    "sourceId": "stoicism_meditations_gutenberg",
+    "sourceUrl": "https://www.gutenberg.org/ebooks/2680",
+    "licenseStatus": "public_domain",
+    "usableScope": "full_text_local_allowed",
+    "evidenceRefs": ["ch001#ck001"],
+    "corpusGeneratedAt": "2026-06-25",
+    "reviewStatus": "content_ready"
+  },
+  {
+    "name": "V1.3 信念后果检查",
+    "type": "theory",
+    "source": "实用主义:一个信念要看它把你带向哪里",
+    "domain": "我如何判断重要",
+    "lens": "实用主义",
+    "intro": "检查一个反复信念在行动、关系和注意力里的后果。",
+    "items": [
+      {
+        "itemKey": "q1",
+        "prompt": "我最近反复相信的一句话是什么?",
+        "format": "free_text",
+        "options": []
+      },
+      {
+        "itemKey": "q2",
+        "prompt": "它让我更靠近什么,又远离什么?",
+        "format": "free_text",
+        "options": []
+      },
+      {
+        "itemKey": "q3",
+        "prompt": "如果换一种更有行动感的说法,会是什么?",
+        "format": "free_text",
+        "options": []
+      }
+    ],
+    "sourceId": "pragmatism_william_james_gutenberg",
+    "sourceUrl": "https://www.gutenberg.org/ebooks/5116",
+    "licenseStatus": "public_domain",
+    "usableScope": "full_text_local_allowed",
+    "evidenceRefs": ["ch003#ck001"],
+    "corpusGeneratedAt": "2026-06-25",
+    "reviewStatus": "content_ready"
+  },
+  {
+    "name": "V1.3 反思循环",
+    "type": "theory",
+    "source": "Dewey:反思不是想更多,而是让问题变清楚",
+    "domain": "我如何学习",
+    "lens": "反思性思维",
+    "intro": "把一次混乱经验整理成问题、假设和下一步验证。",
+    "items": [
+      {
+        "itemKey": "q1",
+        "prompt": "这件事真正卡住我的问题是什么?",
+        "format": "free_text",
+        "options": []
+      },
+      {
+        "itemKey": "q2",
+        "prompt": "我现在默认的解释是什么?",
+        "format": "free_text",
+        "options": []
+      },
+      {
+        "itemKey": "q3",
+        "prompt": "有没有一个小验证能让我更接近事实?",
+        "format": "free_text",
+        "options": []
+      }
+    ],
+    "sourceId": "pragmatism_john_dewey_how_we_think_gutenberg",
+    "sourceUrl": "https://www.gutenberg.org/ebooks/37423",
+    "licenseStatus": "public_domain",
+    "usableScope": "full_text_local_allowed",
+    "evidenceRefs": ["ch001#ck001"],
+    "corpusGeneratedAt": "2026-06-25",
+    "reviewStatus": "content_ready"
+  },
+  {
+    "name": "V1.3 关系中的位置",
+    "type": "theory",
+    "source": "论语:在关系里看见自己的位置",
+    "domain": "我如何与人相处",
+    "lens": "儒家修身",
+    "intro": "看见一段关系里自己默认接下的角色、责任和边界。",
+    "items": [
+      {
+        "itemKey": "q1",
+        "prompt": "这段关系里,我默认自己应该负责什么?",
+        "format": "free_text",
+        "options": []
+      },
+      {
+        "itemKey": "q2",
+        "prompt": "哪些责任是我认可的,哪些只是惯性接下的?",
+        "format": "free_text",
+        "options": []
+      },
+      {
+        "itemKey": "q3",
+        "prompt": "我可以怎样表达善意,同时保留边界?",
+        "format": "free_text",
+        "options": []
+      }
+    ],
+    "sourceId": "eastern_confucius_analects_gutenberg",
+    "sourceUrl": "https://www.gutenberg.org/ebooks/4094",
+    "licenseStatus": "public_domain",
+    "usableScope": "full_text_local_allowed",
+    "evidenceRefs": ["ch001#ck001"],
+    "corpusGeneratedAt": "2026-06-25",
+    "reviewStatus": "content_ready"
+  },
+  {
+    "name": "V1.3 柔软与控制",
+    "type": "theory",
+    "source": "《道德经》:柔软不是退让,而是少一点硬拧",
+    "domain": "我如何面对阻力",
+    "lens": "道家视角",
+    "intro": "检查自己是在解决问题,还是在和局势硬拧。",
+    "items": [
+      {
+        "itemKey": "q1",
+        "prompt": "我现在最想强行推动的是什么?",
+        "format": "free_text",
+        "options": []
+      },
+      {
+        "itemKey": "q2",
+        "prompt": "如果少一点控制,局势本身提供了什么线索?",
+        "format": "free_text",
+        "options": []
+      },
+      {
+        "itemKey": "q3",
+        "prompt": "不逃避但更顺势的一小步是什么?",
+        "format": "free_text",
+        "options": []
+      }
+    ],
+    "sourceId": "eastern_laozi_tao_te_ching_gutenberg",
+    "sourceUrl": "https://www.gutenberg.org/ebooks/216",
+    "licenseStatus": "public_domain",
+    "usableScope": "full_text_local_allowed",
+    "evidenceRefs": ["ch001#ck001"],
+    "corpusGeneratedAt": "2026-06-25",
+    "reviewStatus": "content_ready"
+  },
+  {
+    "name": "V1.3 注意力被什么牵走",
+    "type": "theory",
+    "source": "心念与行动:注意力会养大什么",
+    "domain": "我如何理解情绪",
+    "lens": "佛教经典视角",
+    "intro": "观察反复念头如何牵动情绪和行动方向。",
+    "items": [
+      {
+        "itemKey": "q1",
+        "prompt": "我最近最常在心里重复什么念头?",
+        "format": "free_text",
+        "options": []
+      },
+      {
+        "itemKey": "q2",
+        "prompt": "它通常把我的行动带向哪里?",
+        "format": "free_text",
+        "options": []
+      },
+      {
+        "itemKey": "q3",
+        "prompt": "我想把一点注意力放回哪件具体事情?",
+        "format": "free_text",
+        "options": []
+      }
+    ],
+    "sourceId": "buddhism_dhammapada_gutenberg",
+    "sourceUrl": "https://www.gutenberg.org/ebooks/2017",
+    "licenseStatus": "public_domain",
+    "usableScope": "full_text_local_allowed",
+    "evidenceRefs": ["ch001#ck001"],
+    "corpusGeneratedAt": "2026-06-25",
+    "reviewStatus": "content_ready"
+  },
+  {
+    "name": "V1.3 评价来临时",
+    "type": "theory",
+    "source": "苏格拉底:当外界评价逼近时,我还相信什么",
+    "domain": "我如何面对评价",
+    "lens": "苏格拉底式追问",
+    "intro": "区分值得听的反馈、外界噪音和自己仍想坚持的价值。",
+    "items": [
+      {
+        "itemKey": "q1",
+        "prompt": "最近哪一次评价最牵动我?",
+        "format": "free_text",
+        "options": []
+      },
+      {
+        "itemKey": "q2",
+        "prompt": "这条评价里有没有值得保留的信息?",
+        "format": "free_text",
+        "options": []
+      },
+      {
+        "itemKey": "q3",
+        "prompt": "即使被误解,我仍想坚持什么?",
+        "format": "free_text",
+        "options": []
+      }
+    ],
+    "sourceId": "greek_plato_apology_gutenberg",
+    "sourceUrl": "https://www.gutenberg.org/ebooks/1656",
+    "licenseStatus": "public_domain",
+    "usableScope": "full_text_local_allowed",
+    "evidenceRefs": ["ch001#ck001"],
+    "corpusGeneratedAt": "2026-06-25",
+    "reviewStatus": "content_ready"
+  },
+  {
+    "name": "V1.3 内在治理",
+    "type": "theory",
+    "source": "柏拉图:把内在冲突看成一场治理",
+    "domain": "我如何做选择",
+    "lens": "柏拉图式自我治理",
+    "intro": "把一次内在冲突拆成不同声音,再选择由谁带方向。",
+    "items": [
+      {
+        "itemKey": "q1",
+        "prompt": "这次冲突里,我内在有哪些不同声音?",
+        "format": "free_text",
+        "options": []
+      },
+      {
+        "itemKey": "q2",
+        "prompt": "每个声音分别想保护什么或得到什么?",
+        "format": "free_text",
+        "options": []
+      },
+      {
+        "itemKey": "q3",
+        "prompt": "更清醒的那个部分会建议我做什么?",
+        "format": "free_text",
+        "options": []
+      }
+    ],
+    "sourceId": "greek_plato_republic_gutenberg",
+    "sourceUrl": "https://www.gutenberg.org/ebooks/1497",
+    "licenseStatus": "public_domain",
+    "usableScope": "full_text_local_allowed",
+    "evidenceRefs": ["ch001#ck001"],
+    "corpusGeneratedAt": "2026-06-25",
+    "reviewStatus": "content_ready"
+  },
+  {
+    "name": "V1.3 习惯如何塑造我",
+    "type": "theory",
+    "source": "《尼各马科伦理学》:习惯把人带向某种生活",
+    "domain": "我如何形成自己",
+    "lens": "亚里士多德德性伦理",
+    "intro": "观察一个重复习惯正在把自己塑造成什么样。",
+    "items": [
+      {
+        "itemKey": "q1",
+        "prompt": "我最近反复做的一个小动作是什么?",
+        "format": "free_text",
+        "options": []
+      },
+      {
+        "itemKey": "q2",
+        "prompt": "它正在加强我身上的哪种倾向?",
+        "format": "free_text",
+        "options": []
+      },
+      {
+        "itemKey": "q3",
+        "prompt": "如果替换成一个更小但更好的重复,会是什么?",
+        "format": "free_text",
+        "options": []
+      }
+    ],
+    "sourceId": "greek_aristotle_nicomachean_ethics_gutenberg",
+    "sourceUrl": "https://www.gutenberg.org/ebooks/8438",
+    "licenseStatus": "public_domain",
+    "usableScope": "full_text_local_allowed",
+    "evidenceRefs": ["ch001#ck001"],
+    "corpusGeneratedAt": "2026-06-25",
+    "reviewStatus": "content_ready"
+  },
+  {
+    "name": "V1.3 结构与行动",
+    "type": "theory",
+    "source": "共同体中的我:自由也需要结构",
+    "domain": "我如何在系统中行动",
+    "lens": "亚里士多德政治哲学",
+    "intro": "分清个人习惯、角色期待和结构限制各自的位置。",
+    "items": [
+      {
+        "itemKey": "q1",
+        "prompt": "这件事里有哪些压力来自角色或结构?",
+        "format": "free_text",
+        "options": []
+      },
+      {
+        "itemKey": "q2",
+        "prompt": "我把哪些结构限制误认为自己的失败?",
+        "format": "free_text",
+        "options": []
+      },
+      {
+        "itemKey": "q3",
+        "prompt": "在这个结构里,我仍能移动的一小步是什么?",
+        "format": "free_text",
+        "options": []
+      }
+    ],
+    "sourceId": "greek_aristotle_politics_gutenberg",
+    "sourceUrl": "https://www.gutenberg.org/ebooks/6762",
+    "licenseStatus": "public_domain",
+    "usableScope": "full_text_local_allowed",
+    "evidenceRefs": ["ch001#ck001"],
+    "corpusGeneratedAt": "2026-06-25",
+    "reviewStatus": "content_ready"
+  },
+  {
+    "name": "V1.3 我正在成为谁",
+    "type": "theory",
+    "source": "尼采:成为自己之前,先看见旧价值怎样说话",
+    "domain": "我如何定义重要",
+    "lens": "尼采式价值重估",
+    "intro": "检查一个“我应该”背后的来源、代价和真实程度。",
+    "items": [
+      {
+        "itemKey": "q1",
+        "prompt": "我最近最常听见的“我应该”是什么?",
+        "format": "free_text",
+        "options": []
+      },
+      {
+        "itemKey": "q2",
+        "prompt": "它更像来自我自己、他人期待,还是旧习惯?",
+        "format": "single_choice",
+        "options": ["更像我自己", "更像他人期待", "更像旧习惯", "分不清"]
+      },
+      {
+        "itemKey": "q3",
+        "prompt": "如果更诚实一点,我会承认什么对我重要?",
+        "format": "free_text",
+        "options": []
+      }
+    ],
+    "sourceId": "existentialism_nietzsche_zarathustra_gutenberg",
+    "sourceUrl": "https://www.gutenberg.org/ebooks/1998",
+    "licenseStatus": "public_domain",
+    "usableScope": "full_text_local_allowed",
+    "evidenceRefs": ["ch001#ck001"],
+    "corpusGeneratedAt": "2026-06-25",
+    "reviewStatus": "content_ready"
+  }
+]

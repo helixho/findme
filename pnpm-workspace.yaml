@@ -1,0 +1,10 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+# Catalog: single source of truth for shared dev-tool versions.
+# Workspaces reference with "catalog:" — change here to upgrade everywhere.
+catalog:
+  typescript: ^5.9.3
+  vitest: ^4.1.11
+  "@biomejs/biome": ^1.9.0

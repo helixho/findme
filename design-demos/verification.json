@@ -1,0 +1,101 @@
+{
+  "date": "2026-10-27",
+  "engine": "Chromium via Playwright 1.59.1",
+  "results": [
+    {
+      "direction": 1,
+      "desktop": "1440×1000",
+      "mobile": "375×812",
+      "consoleErrors": [],
+      "flow": "首页 → 专题 → 依据 → 纠正 → 修订 → 当前版本；自由输入待核验；未知保持；无横向溢出",
+      "status": "passed"
+    },
+    {
+      "direction": 2,
+      "desktop": "1440×1000",
+      "mobile": "375×812",
+      "consoleErrors": [],
+      "flow": "首页 → 专题 → 依据 → 纠正 → 修订 → 当前版本；自由输入待核验；未知保持；无横向溢出",
+      "status": "passed"
+    },
+    {
+      "direction": 3,
+      "desktop": "1440×1000",
+      "mobile": "375×812",
+      "consoleErrors": [],
+      "flow": "首页 → 专题 → 依据 → 纠正 → 修订 → 当前版本；自由输入待核验；未知保持；无横向溢出",
+      "status": "passed"
+    }
+  ],
+  "textAudit": {
+    "views": ["home", "topic", "correction"],
+    "viewport": "375×812",
+    "minimumContrast": 4.5,
+    "minimumLabelPx": 12,
+    "issues": []
+  },
+  "additional": [
+    {
+      "direction": 1,
+      "emptySubmit": "passed",
+      "escapeFocusReturn": "passed",
+      "historyBackForward": "passed",
+      "bodyScrollRestored": "passed",
+      "homeTouchTargetsMin44": "passed"
+    },
+    {
+      "direction": 2,
+      "emptySubmit": "passed",
+      "escapeFocusReturn": "passed",
+      "historyBackForward": "passed",
+      "bodyScrollRestored": "passed",
+      "homeTouchTargetsMin44": "passed"
+    },
+    {
+      "direction": 3,
+      "emptySubmit": "passed",
+      "escapeFocusReturn": "passed",
+      "historyBackForward": "passed",
+      "bodyScrollRestored": "passed",
+      "homeTouchTargetsMin44": "passed"
+    }
+  ],
+  "galleryLinks": "all local targets exist",
+  "prototypePersistence": {
+    "date": "2026-10-30",
+    "engine": "Chromium headless shell 152.0.7977.30 / Playwright 1.59.1",
+    "results": [
+      {
+        "viewport": "1440×1000",
+        "status": "passed",
+        "checks": [
+          "零资料起步",
+          "填写并保存探索",
+          "待处理页展示原输入和有限观察",
+          "刷新后探索保留",
+          "零资料首页显示待核验次数",
+          "重置后探索记录与计数清空",
+          "无横向溢出",
+          "控制台零错误",
+          "无外部请求"
+        ]
+      },
+      {
+        "viewport": "390×844",
+        "status": "passed",
+        "checks": [
+          "零资料起步",
+          "填写并保存探索",
+          "待处理页展示原输入和有限观察",
+          "刷新后探索保留",
+          "零资料首页显示待核验次数",
+          "重置后探索记录与计数清空",
+          "无横向溢出",
+          "控制台零错误",
+          "无外部请求"
+        ]
+      }
+    ],
+    "persistence": "原型状态使用 sessionStorage；刷新保留，关闭标签页后不承诺保留。重置原型状态会清除待核验探索。"
+  }
+}

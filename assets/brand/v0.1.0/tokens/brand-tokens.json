@@ -1,0 +1,51 @@
+{
+  "version": "0.1.0",
+  "colors": {
+    "brand": {
+      "primary": "#0EA5A0",
+      "secondary": "#0F2D3D",
+      "surface": "#E6F4F2",
+      "background": "#FAFAF8"
+    },
+    "semantic": {
+      "observation": "#0EA5A0",
+      "evidence": "#3B82F6",
+      "interpretation": "#8B5CF6",
+      "counterEvidence": "#F97373",
+      "revision": "#F59E0B",
+      "action": "#22C55E",
+      "uncertain": "#94A3B8"
+    },
+    "neutral": {
+      "900": "#111827",
+      "600": "#4B5563",
+      "300": "#D1D5DB",
+      "100": "#F3F4F6"
+    }
+  },
+  "typography": {
+    "uiSans": [
+      "Inter",
+      "Source Han Sans SC",
+      "PingFang SC",
+      "sans-serif"
+    ],
+    "editorialSerif": [
+      "Source Han Serif SC",
+      "Songti SC",
+      "serif"
+    ]
+  },
+  "radius": {
+    "sm": "8px",
+    "md": "12px",
+    "lg": "18px"
+  },
+  "shadow": {
+    "card": "0 8px 24px rgba(15,45,61,0.08)"
+  },
+  "principles": {
+    "serifUsage": "reflection/editorial emphasis only; not controls or evidence UI",
+    "evidencePresentation": "use typography + semantic token; never encode truth solely by color"
+  }
+}

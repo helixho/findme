@@ -1,0 +1,3 @@
+# Unified-diff context intentionally has a marker space before source tabs/blank lines.
+# Keep patch bytes exact; normal source whitespace checks remain enabled.
+patches/*.patch -whitespace

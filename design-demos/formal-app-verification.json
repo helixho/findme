@@ -1,0 +1,85 @@
+{
+  "kind": "formal React App, intercepted synthetic API responses; no production access",
+  "results": [
+    {
+      "mode": "account",
+      "width": 1440,
+      "checks": "overview/topic/evidence/draft/failed save/receipt/real version diff/source invalid/profile empty/no inference",
+      "passed": true
+    },
+    {
+      "mode": "account",
+      "width": 390,
+      "checks": "overview/topic/evidence/draft/failed save/receipt/real version diff/source invalid/profile empty/no inference",
+      "passed": true
+    },
+    {
+      "mode": "existing-report",
+      "width": 1440,
+      "checks": "overview/topic/evidence version/home brand navigation/draft/saved not revised/real diff/blocked report/no inference",
+      "passed": true
+    },
+    {
+      "mode": "existing-report",
+      "width": 390,
+      "checks": "overview/topic/evidence version/home brand navigation/draft/saved not revised/real diff/blocked report/no inference",
+      "passed": true
+    }
+  ],
+  "raceChecks": {
+    "viewport": "375×812",
+    "lateProfileResponse": "passed: A response cannot clear B content",
+    "sameAccountRelogin": "passed: active list reloads without manual navigation",
+    "strictModeInitialList": "passed"
+  },
+  "audits": [
+    {
+      "name": "account-home-1440",
+      "issues": []
+    },
+    {
+      "name": "account-topic-1440",
+      "issues": []
+    },
+    {
+      "name": "account-correction-1440",
+      "issues": []
+    },
+    {
+      "name": "account-home-390",
+      "issues": []
+    },
+    {
+      "name": "account-topic-390",
+      "issues": []
+    },
+    {
+      "name": "account-correction-390",
+      "issues": []
+    },
+    {
+      "name": "report-home-1440",
+      "issues": []
+    },
+    {
+      "name": "report-topic-1440",
+      "issues": []
+    },
+    {
+      "name": "report-correction-1440",
+      "issues": []
+    },
+    {
+      "name": "report-home-390",
+      "issues": []
+    },
+    {
+      "name": "report-topic-390",
+      "issues": []
+    },
+    {
+      "name": "report-correction-390",
+      "issues": []
+    }
+  ]
+}

@@ -1,0 +1,293 @@
+.cloud-workspace {
+  padding-bottom: 3rem;
+  color: var(--ink, #edf2e7);
+}
+.cloud-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--line, #3c5653);
+  color: var(--ink, #edf2e7);
+}
+.cloud-header label {
+  margin-left: auto;
+}
+.cloud-workspace .app-main {
+  width: min(100% - 80px, 1200px);
+  max-width: 1200px;
+  margin: auto;
+}
+.cloud-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .65rem;
+  margin: 1rem 0;
+}
+.cloud-workspace button,
+.cloud-auth button {
+  cursor: pointer;
+}
+.cloud-workspace button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.cloud-workspace label,
+.cloud-auth label {
+  display: grid;
+  gap: .4rem;
+  margin: 1rem 0;
+}
+.cloud-workspace input,
+.cloud-workspace select,
+.cloud-workspace textarea,
+.cloud-auth input {
+  font: inherit;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: .7rem;
+  border: 1px solid var(--line, #3c5653);
+  border-radius: 8px;
+  background: var(--fm-raised, #213b3c);
+  color: var(--ink, #edf2e7);
+}
+.cloud-workspace input::placeholder,
+.cloud-workspace textarea::placeholder,
+.cloud-auth input::placeholder {
+  color: var(--fm-muted, #a9bdb3);
+}
+.cloud-workspace textarea {
+  width: 100%;
+  resize: vertical;
+}
+.cloud-workspace button:not(.button),
+.cloud-auth nav button {
+  font: inherit;
+  border: 1px solid var(--line, #3c5653);
+  border-radius: 8px;
+  padding: .55rem .8rem;
+  background: var(--fm-raised, #213b3c);
+  color: var(--fm-text, #d1ded6);
+}
+.cloud-workspace button[aria-pressed="true"] {
+  font-weight: 700;
+  border-width: 2px;
+  color: var(--fm-accent, #d3ef8c);
+  border-color: var(--fm-accent, #d3ef8c);
+}
+.cloud-runs {
+  display: grid;
+  gap: 1rem;
+  margin: 1rem 0;
+}
+.cloud-run {
+  text-align: left;
+  display: grid;
+  gap: .5rem;
+}
+.cloud-run span {
+  font-size: .9rem;
+}
+.cloud-report article,
+.cloud-workspace article {
+  padding: 1rem 0;
+  border-bottom: 1px solid var(--line, #3c5653);
+}
+.cloud-report p,
+.cloud-workspace article p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.7;
+}
+.cloud-workspace small {
+  display: block;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.cloud-workspace details {
+  margin: 1rem 0;
+  padding: .75rem;
+  border: 1px solid var(--line, #3c5653);
+  border-radius: 8px;
+  background: var(--fm-panel, #1a3032);
+}
+.cloud-workspace summary {
+  cursor: pointer;
+}
+.cloud-workspace pre {
+  max-height: 24rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 1rem;
+  border: 1px solid var(--line, #3c5653);
+  border-radius: 8px;
+  background: #0f2224;
+  color: var(--fm-text, #d1ded6);
+}
+.cloud-evidence {
+  padding: 1rem;
+  border: 2px solid var(--line, #3c5653);
+  border-radius: 12px;
+  background: var(--fm-panel, #1a3032);
+  color: var(--ink, #edf2e7);
+}
+.cloud-choice {
+  display: flex !important;
+  align-items: flex-start;
+  gap: .6rem;
+}
+.cloud-choice input {
+  flex-shrink: 0;
+}
+.cloud-profile-admin {
+  margin-top: 3rem !important;
+}
+.cloud-profile-admin div {
+  display: flex;
+  gap: .5rem;
+  flex-wrap: wrap;
+  margin-top: .6rem;
+}
+.cloud-auth form {
+  display: grid;
+  gap: .6rem;
+}
+.cloud-auth,
+.cloud-workspace p,
+.cloud-workspace small,
+.cloud-auth p {
+  color: var(--fm-text, #d1ded6);
+}
+.cloud-workspace h1,
+.cloud-workspace h2,
+.cloud-workspace h3,
+.cloud-auth h1,
+.cloud-auth h2,
+.cloud-auth h3 {
+  color: var(--ink, #edf2e7);
+}
+.cloud-workspace .button.primary,
+.cloud-auth .button.primary {
+  background: var(--fm-accent, #d3ef8c);
+  color: var(--fm-accent-ink, #203727);
+}
+.cloud-workspace .button.secondary,
+.cloud-auth .button.secondary {
+  background: var(--fm-panel, #1a3032);
+  color: var(--fm-text, #d1ded6);
+  border-color: var(--line, #3c5653);
+}
+.cloud-workspace .fm-nav.cloud-actions {
+  min-height: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+@media (max-width: 600px) {
+  .cloud-header {
+    padding: .8rem;
+    gap: .5rem;
+  }
+  .cloud-header label {
+    width: 100%;
+    margin: 0;
+  }
+  .cloud-workspace .app-main {
+    width: auto;
+    padding: 28px 22px 42px;
+  }
+  .cloud-actions button {
+    flex-grow: 1;
+  }
+}
+
+.cloud-workspace > .cloud-header {
+  min-height: 90px;
+  padding: 18px max(22px, calc((100vw - 1200px) / 2));
+}
+.cloud-workspace .cloud-header .brand-button.fm-brand {
+  border: 0;
+  padding: 0;
+  min-height: 44px;
+  background: transparent;
+}
+.cloud-workspace details.fm-account {
+  margin: 0 0 0 auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.cloud-workspace .fm-shell-nav.fm-nav button {
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+}
+.cloud-workspace .fm-shell-nav.fm-nav button[aria-pressed="true"] {
+  color: var(--fm-accent);
+  background: #20382f;
+  border-color: #536b4a;
+}
+.cloud-workspace button.fm-topic-card {
+  padding: 25px 26px;
+  border-radius: 18px;
+  background: var(--fm-panel);
+}
+.cloud-detail > h1 {
+  margin: 24px 0 30px;
+  font-size: clamp(32px, 3.4vw, 44px);
+  font-weight: 450;
+  line-height: 1.5;
+}
+.cloud-workspace .cloud-detail .fm-nav button {
+  border-radius: 30px;
+}
+.cloud-workspace .cloud-detail .section-head > button:first-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+@media (max-width: 700px) {
+  .cloud-workspace > .cloud-header {
+    min-height: 76px;
+    padding: 12px 22px;
+  }
+  .cloud-workspace .fm-shell-nav.fm-nav button {
+    border-radius: 10px;
+  }
+}
+
+/* Conversation: same reading rhythm as reports; outcome first, details below. */
+.conversation-view output {
+  display: block;
+  margin: 0.6rem 0;
+}
+.conversation-view textarea {
+  width: 100%;
+}
+.conversation-view .conversation-outcome {
+  font-size: 1.1rem;
+  color: var(--fm-accent);
+}
+.conversation-view ul {
+  padding-left: 1.2rem;
+}
+.conversation-view li {
+  margin-bottom: 0.9rem;
+}
+.conversation-view .conversation-correct {
+  margin-top: 0.6rem;
+}
+/* Four primary entries must fit the 390px dock without wrapping labels. */
+@media (max-width: 700px) {
+  .cloud-workspace .fm-shell-nav.fm-nav button {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 6px 4px;
+  }
+  .cloud-workspace .fm-shell-nav.fm-nav button span {
+    white-space: nowrap;
+    font-size: 13px;
+  }
+}

@@ -1,0 +1,58 @@
+export type CoreErrorCode =
+  | "ACCOUNT_DISABLED"
+  | "DIAGNOSTIC_SCOPE_INVALID"
+  | "DIAGNOSTIC_NOT_FOUND"
+  | "DIAGNOSTIC_SOURCE_STALE"
+  | "IDEMPOTENCY_KEY_REQUIRED"
+  | "EXPLORATION_NOT_FOUND"
+  | "QUESTION_NOT_OPEN"
+  | "STALE_VERSION"
+  | "STALE_CLAIM_REVISION"
+  | "IDEMPOTENCY_KEY_REUSED"
+  | "OPERATION_IN_PROGRESS"
+  | "SOURCE_VERSION_CONFLICT"
+  | "LLM_UNAVAILABLE"
+  | "CORE_MODEL_LIMIT_REACHED"
+  | "REPORT_BRIDGE_UNAVAILABLE"
+  | "REPORT_TARGET_REQUIRED"
+  | "STALE_REPORT_VERSION"
+  | "FINDING_NOT_FOUND"
+  | "STALE_EXPLORATION_CONTEXT"
+  | "STALE_REPORT_SOURCE"
+  | "REPORT_SOURCE_INELIGIBLE"
+  | "FEEDBACK_INPUT_BOUND_EXCEEDED"
+  | "REPORT_OWNER_MISMATCH"
+  | "U2_APPROVED_SET_MISMATCH"
+  | "U2_TOPIC_INVALID"
+  | "U2_SOURCE_FINGERPRINT_INVALID"
+  | "U2_IMPORT_PREVIEW_CONFLICT"
+  | "U2_IMPORT_NOT_CONFIRMABLE"
+  | "U2_IMPORT_CONFIRMATION_REQUIRED"
+  | "U2_IMPORT_CONFIRMATION_STALE"
+  | "U2_IMPORT_RUN_CONFLICT"
+  | "U2_IMPORT_REPORT_CONFLICT"
+  | "U2_IMPORT_EVIDENCE_INVALID"
+  | "U2_IMPORT_SOURCE_CONFLICT"
+  | "U2_IMPORT_REFERENCE_CONFLICT"
+  | "U2_IMPORT_NOT_FOUND"
+  | "U2_IMPORT_PREVIEW_STALE"
+  | "NOT_FOUND";
+
+export class CoreError extends Error {
+  readonly code: CoreErrorCode;
+  readonly status: 202 | 400 | 403 | 404 | 409 | 422 | 503;
+  readonly details?: Record<string, unknown>;
+
+  constructor(
+    code: CoreErrorCode,
+    status: 202 | 400 | 403 | 404 | 409 | 422 | 503,
+    message: string,
+    details?: Record<string, unknown>,
+  ) {
+    super(message);
+    this.name = "CoreError";
+    this.code = code;
+    this.status = status;
+    this.details = details;
+  }
+}

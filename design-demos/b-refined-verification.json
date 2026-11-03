@@ -1,0 +1,92 @@
+{
+  "date": "2026-10-27",
+  "engine": "Chromium / Playwright 1.59.1",
+  "results": [
+    {
+      "viewport": "1440×1000",
+      "status": "passed",
+      "checks": [
+        "整体完整阅读",
+        "按需展开关系与无关联项保持未知",
+        "来源核对与Escape焦点返回",
+        "空白提交阻止与草稿保留",
+        "示例修订",
+        "历史版本只读",
+        "首页与关联专题同步",
+        "未知项不变",
+        "自由输入待核验且转义",
+        "前进后退",
+        "刷新重置",
+        "无横向溢出",
+        "控制台零错误",
+        "无HTTP请求"
+      ]
+    },
+    {
+      "viewport": "390×844",
+      "status": "passed",
+      "checks": [
+        "整体完整阅读",
+        "按需展开关系与无关联项保持未知",
+        "来源核对与Escape焦点返回",
+        "空白提交阻止与草稿保留",
+        "示例修订",
+        "历史版本只读",
+        "首页与关联专题同步",
+        "未知项不变",
+        "自由输入待核验且转义",
+        "前进后退",
+        "刷新重置",
+        "无横向溢出",
+        "控制台零错误",
+        "无HTTP请求"
+      ]
+    },
+    {
+      "viewport": "375×812",
+      "status": "passed",
+      "checks": [
+        "整体完整阅读",
+        "按需展开关系与无关联项保持未知",
+        "来源核对与Escape焦点返回",
+        "空白提交阻止与草稿保留",
+        "示例修订",
+        "历史版本只读",
+        "首页与关联专题同步",
+        "未知项不变",
+        "自由输入待核验且转义",
+        "前进后退",
+        "刷新重置",
+        "无横向溢出",
+        "控制台零错误",
+        "无HTTP请求"
+      ]
+    }
+  ],
+  "textAudit": {
+    "viewport": "375×812",
+    "routes": [
+      "home",
+      "overview",
+      "topics",
+      "topic/work",
+      "topic/relation",
+      "topic/energy",
+      "correct/work",
+      "history",
+      "evidence"
+    ],
+    "minimumContrast": 4.5,
+    "minimumLabelPx": 12,
+    "minimumTouchTargetPx": 44,
+    "issues": []
+  },
+  "finalChecks": {
+    "galleryLinks": "all exist",
+    "mobileGalleryOverflow": false,
+    "formExample": "inline next to textarea; filled, submitted and verified at desktop and mobile widths",
+    "screenshots": "viewport images preserve fixed navigation; long mobile images place navigation at end for readability",
+    "historicalEvidence": "historical version uses only its original sources and offers current-version navigation; current version includes new counterexample",
+    "crossTopicDrafts": "work and expression drafts preserved separately; example submit still completes revision"
+  }
+}

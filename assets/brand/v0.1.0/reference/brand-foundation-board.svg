@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000">
+<defs><linearGradient id="g" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#0EA5A0"/><stop offset="1" stop-color="#0F2D3D"/></linearGradient></defs>
+<rect width="1600" height="1000" fill="#FAFAF8"/>
+<style>.h1{font:700 64px Inter,Arial,sans-serif;fill:#111827}.h2{font:700 30px Inter,Arial,sans-serif;fill:#0F2D3D}.body{font:400 24px Inter,'PingFang SC',sans-serif;fill:#4B5563}.small{font:500 18px Inter,'PingFang SC',sans-serif;fill:#4B5563}.cap{font:700 18px Inter,Arial,sans-serif;letter-spacing:3px;fill:#0EA5A0}</style>
+<text x="70" y="90" class="cap">FINDME BRAND FOUNDATION · V0.1.0</text>
+<text x="70" y="170" class="h1">Open Frame</text><text x="70" y="220" class="body">看清自己。 · See Yourself Clearly.</text>
+<g transform="translate(70 290)"><g fill="none" stroke="url(#g)" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"><path d="M74 20H38Q20 20 20 38V74"/><path d="M166 20H202Q220 20 220 38V74"/><path d="M20 166V202Q20 220 38 220H74"/><path d="M166 220H202Q220 220 220 202V166"/></g><circle cx="120" cy="120" r="16" fill="#0EA5A0"/></g>
+<text x="330" y="390" class="h1">Find<tspan fill="#0EA5A0">Me</tspan></text><text x="330" y="435" class="body">四个开放角 + 中央定位点</text><text x="330" y="475" class="small">结构存在，但不封闭；聚焦当下，也允许持续修订。</text>
+<text x="70" y="610" class="h2">Brand tokens</text>
+<g transform="translate(70 650)">
+<rect x="0" y="0" width="180" height="90" rx="18" fill="#0EA5A0"/><text x="0" y="125" class="small">Primary #0EA5A0</text>
+<rect x="210" y="0" width="180" height="90" rx="18" fill="#0F2D3D"/><text x="210" y="125" class="small">Secondary #0F2D3D</text>
+<rect x="420" y="0" width="180" height="90" rx="18" fill="#E6F4F2" stroke="#D1D5DB"/><text x="420" y="125" class="small">Surface #E6F4F2</text>
+<rect x="630" y="0" width="180" height="90" rx="18" fill="#FAFAF8" stroke="#D1D5DB"/><text x="630" y="125" class="small">Background #FAFAF8</text>
+</g>
+<text x="980" y="330" class="h2">Semantic states</text>
+<g transform="translate(980 365)"><circle cx="16" cy="16" r="16" fill="#0EA5A0"/><text x="50" y="24" class="body">Observation</text><circle cx="16" cy="72" r="16" fill="#3B82F6"/><text x="50" y="80" class="body">Evidence</text><circle cx="16" cy="128" r="16" fill="#8B5CF6"/><text x="50" y="136" class="body">Interpretation</text><circle cx="16" cy="184" r="16" fill="#F97373"/><text x="50" y="192" class="body">Counter-evidence</text><circle cx="16" cy="240" r="16" fill="#F59E0B"/><text x="50" y="248" class="body">Revision</text><circle cx="16" cy="296" r="16" fill="#22C55E"/><text x="50" y="304" class="body">Action</text><circle cx="16" cy="352" r="16" fill="#94A3B8"/><text x="50" y="360" class="body">Uncertain</text></g>
+<text x="980" y="820" class="h2">Voice</text><text x="980" y="865" class="body">直接，但不武断 · 批判，但不羞辱</text><text x="980" y="905" class="body">允许不知道 · 暴露依据与边界 · 支持自主选择</text>
+<text x="70" y="950" class="small">Status: candidate-selected. Logo A topology frozen; tokens validate through T1 product UI before v1.0.</text>
+</svg>

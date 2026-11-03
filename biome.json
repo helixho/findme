@@ -1,0 +1,63 @@
+{
+  "$schema": "https://biomejs.dev/schemas/1.9.0/schema.json",
+  "files": {
+    "ignore": [
+      "dist",
+      "migrations",
+      "node_modules",
+      "assets",
+      "coverage",
+      "playwright-report",
+      "test-results"
+    ]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true
+    }
+  },
+  "organizeImports": {
+    "enabled": true
+  },
+  "overrides": [
+    {
+      "include": ["apps/api/test/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noNonNullAssertion": "off",
+            "useConst": "off"
+          },
+          "suspicious": {
+            "noExplicitAny": "off",
+            "noThenProperty": "off",
+            "noImplicitAnyLet": "off"
+          },
+          "performance": {
+            "noDelete": "off"
+          }
+        }
+      }
+    },
+    {
+      "include": [
+        "apps/api/src/understanding-baseline/candidate-prune.ts",
+        "apps/api/src/understanding-baseline/provider-migration.ts"
+      ],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noExplicitAny": "off"
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+/* FindMe Brand Tokens v0.1.0 — candidate-selected */
+:root {
+  --fm-brand-primary: #0EA5A0;
+  --fm-brand-secondary: #0F2D3D;
+  --fm-surface: #E6F4F2;
+  --fm-background: #FAFAF8;
+  --fm-observation: #0EA5A0;
+  --fm-evidence: #3B82F6;
+  --fm-interpretation: #8B5CF6;
+  --fm-counter-evidence: #F97373;
+  --fm-revision: #F59E0B;
+  --fm-action: #22C55E;
+  --fm-uncertain: #94A3B8;
+  --fm-neutral-900: #111827;
+  --fm-neutral-600: #4B5563;
+  --fm-neutral-300: #D1D5DB;
+  --fm-neutral-100: #F3F4F6;
+  --fm-radius-sm: 8px;
+  --fm-radius-md: 12px;
+  --fm-radius-lg: 18px;
+  --fm-shadow-card: 0 8px 24px rgba(15, 45, 61, 0.08);
+}

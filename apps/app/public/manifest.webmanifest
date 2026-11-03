@@ -1,0 +1,13 @@
+{
+  "name": "FindMe",
+  "short_name": "FindMe",
+  "description": "看清自己。See Yourself Clearly.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#122628",
+  "theme_color": "#122628",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

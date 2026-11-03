@@ -1,0 +1,60 @@
+name: findme
+services:
+  postgres:
+    image: postgres:18-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: findme
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run scripts/install-deploy.sh first}
+    volumes:
+      - ${FINDME_STATE_DIR}/postgres:/var/lib/postgresql
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U postgres -d findme']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    logging:
+      options: {max-size: 10m, max-file: '3'}
+  app:
+    image: findme-local:${FINDME_VERSION:-current}
+    build:
+      context: ../..
+      dockerfile: deployment/standalone/Dockerfile
+      args:
+        FINDME_VERSION: ${FINDME_VERSION:-unknown}
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 2m
+    depends_on:
+      postgres: {condition: service_healthy}
+    ports:
+      - '${FINDME_BIND:-0.0.0.0}:${FINDME_PORT:-8000}:8000'
+    volumes:
+      - ${FINDME_STATE_DIR}/files:/data/files
+    environment:
+      FINDME_LOCAL_RUNTIME: '1'
+      APP_AUTH_MODE: account
+      DATABASE_URL_RUNTIME: postgresql://findme_runtime_login:${DB_RUNTIME_PASSWORD}@postgres/findme
+      DATABASE_URL_IDENTITY: postgresql://findme_identity_login:${DB_IDENTITY_PASSWORD}@postgres/findme
+      DATABASE_URL_AUTH: postgresql://findme_auth_login:${DB_AUTH_PASSWORD}@postgres/findme
+      ACCOUNT_BASE_URL: ${FINDME_PUBLIC_URL}
+      ACCOUNT_TRUSTED_ORIGINS: ${FINDME_PUBLIC_URL}
+      ACCOUNT_SECRET: ${ACCOUNT_SECRET}
+      ACCOUNT_REGISTRATION_ENABLED: '0'
+      OWNER_EMAIL: ${OWNER_EMAIL}
+      OWNER_PASSWORD: ${OWNER_PASSWORD}
+      CLOUD_INFERENCE_ENABLED: ${CLOUD_INFERENCE_ENABLED:-0}
+      CLOUD_PROFILE_CALL_LIMIT: ${CLOUD_PROFILE_CALL_LIMIT:-0}
+      CLOUD_JOB_CALL_LIMIT: ${CLOUD_JOB_CALL_LIMIT:-4}
+      CORE_MODEL_DAILY_OPERATION_LIMIT: ${CORE_MODEL_DAILY_OPERATION_LIMIT:-0}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-v4-flash}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+    healthcheck:
+      test: [CMD, node, -e, 'fetch("http://127.0.0.1:8000/ready").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))']
+      interval: 30s
+      timeout: 10s
+      retries: 4
+      start_period: 30s
+    logging:
+      options: {max-size: 10m, max-file: '3'}

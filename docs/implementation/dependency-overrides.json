@@ -1,0 +1,483 @@
+{
+  "reviewedAt": "2026-10-31",
+  "base": "cfe84dd8273e521d7e0d82b7d5a31ca498567f86",
+  "scope": "Remaining API/React App workspace dependency graph after explicit retirement of apps/web and apps/miniapp. Historical Taro repairs do not remain as active dependencies.",
+  "historyLimit": "Older commits record repair intent but not per-package independent compatibility; this inventory does not invent that evidence.",
+  "overrides": {
+    "seroval": {
+      "version": "1.6.11",
+      "introducedBy": "a3d8089cb1fb622aacf6938132540c6139c65be2",
+      "reason": "Patch existing pin to 1.6.11; existing Solid ~1.5.0 parent-range exception remains explicit. Exercise serializer compatibility; no claim that optional Solid client runs in API.",
+      "declaredParents": [
+        {
+          "parent": "seroval-plugins@1.5.4",
+          "declaredRequirements": ["^1.0"],
+          "resolved": "1.6.11",
+          "requirementSource": "Remaining workspace lock snapshot and installed parent manifest after client retirement."
+        },
+        {
+          "parent": "solid-js@1.9.13",
+          "declaredRequirements": ["~1.5.0"],
+          "resolved": "1.6.11",
+          "requirementSource": "Remaining workspace lock snapshot and installed parent manifest after client retirement."
+        }
+      ]
+    },
+    "browserslist": {
+      "version": "4.28.7",
+      "introducedBy": "51fef9865c13c4d3095f486ac631e8f851ac6502",
+      "reason": "保留；现有全部父要求包含 4.28.7；构建链。",
+      "declaredParents": [
+        {
+          "parent": "@babel/helper-compilation-targets@7.29.7",
+          "declaredRequirements": ["^4.24.0"],
+          "resolved": "4.28.7",
+          "requirementSource": "Remaining workspace lock snapshot and installed parent manifest after client retirement."
+        },
+        {
+          "parent": "update-browserslist-db@1.2.3",
+          "declaredRequirements": [">= 4.21.0"],
+          "resolved": "4.28.7",
+          "requirementSource": "Remaining workspace lock snapshot and installed parent manifest after client retirement."
+        }
+      ]
+    },
+    "immutable": {
+      "version": "5.1.8",
+      "introducedBy": "51fef9865c13c4d3095f486ac631e8f851ac6502",
+      "reason": "保留；sass ^5.1.5 范围内。",
+      "declaredParents": [
+        {
+          "parent": "sass@1.101.0",
+          "declaredRequirements": ["^5.1.5"],
+          "resolved": "5.1.8",
+          "requirementSource": "Remaining workspace lock snapshot and installed parent manifest after client retirement."
+        }
+      ]
+    },
+    "undici": {
+      "version": "7.30.1",
+      "introducedBy": "51fef9865c13c4d3095f486ac631e8f851ac6502",
+      "reason": "Patch existing Miniflare tooling override within major7; verify Worker simulator rather than treating it as replacement for Node built-in fetch.",
+      "declaredParents": [
+        {
+          "parent": "miniflare@5.20260916.0-alpha",
+          "declaredRequirements": ["7.29.0"],
+          "resolved": "7.30.1",
+          "requirementSource": "Remaining workspace lock snapshot and installed parent manifest after client retirement."
+        }
+      ]
+    },
+    "source-map-js": {
+      "version": "1.2.2",
+      "introducedBy": "51fef9865c13c4d3095f486ac631e8f851ac6502",
+      "reason": "保留；父包要求均允许 1.2.2。",
+      "declaredParents": [
+        {
+          "parent": "magicast@0.5.5",
+          "declaredRequirements": ["^1.2.1"],
+          "resolved": "1.2.2",
+          "requirementSource": "Remaining workspace lock snapshot and installed parent manifest after client retirement."
+        },
+        {
+          "parent": "postcss@8.5.32",
+          "declaredRequirements": ["^1.2.2"],
+          "resolved": "1.2.2",
+          "requirementSource": "Remaining workspace lock snapshot and installed parent manifest after client retirement."
+        },
+        {
+          "parent": "sass@1.101.0",
+          "declaredRequirements": [">=0.6.2 <2.0.0"],
+          "resolved": "1.2.2",
+          "requirementSource": "Remaining workspace lock snapshot and installed parent manifest after client retirement."
+        },
+        {
+          "parent": "tsup@9.0.0",
+          "declaredRequirements": ["^1.2.2"],
+          "resolved": "1.2.2",
+          "requirementSource": "Remaining workspace lock snapshot and installed parent manifest after client retirement."
+        }
+      ]
+    },
+    "form-data": {
+      "version": "4.0.6",
+      "introducedBy": "51fef9865c13c4d3095f486ac631e8f851ac6502",
+      "reason": "保留；axios/jsdom/types 的 4.x 范围内；不是 OpenAI 4 使用的 formdata-node。",
+      "declaredParents": [
+        {
+          "parent": "@types/node-fetch@2.6.13",
+          "declaredRequirements": ["^4.0.4"],
+          "resolved": "4.0.6",
+          "requirementSource": "Remaining workspace lock snapshot and installed parent manifest after client retirement."
+        },
+        {
+          "parent": "jsdom@24.1.3",
+          "declaredRequirements": ["^4.0.0"],
+          "resolved": "4.0.6",
+          "requirementSource": "Remaining workspace lock snapshot and installed parent manifest after client retirement."
+        }
+      ]
+    },
+    "nanoid": {
+      "version": "3.3.18",
+      "introducedBy": "51fef9865c13c4d3095f486ac631e8f851ac6502",
+      "reason": "保留；ics/postcss 的 3.x 范围内。",
+      "declaredParents": [
+        {
+          "parent": "postcss@8.5.32",
+          "declaredRequirements": ["^3.3.20"],
+          "resolved": "3.3.18",
+          "requirementSource": "Remaining workspace lock snapshot and installed parent manifest after client retirement."
+        }
+      ]
+    },
+    "brace-expansion@5.0.6": {
+      "version": "5.0.12",
+      "introducedBy": "14eecb8e7211673bd259f843388e07c6296337ef",
+      "reason": "保留；当前 5.0.12 满足 minimatch10 ^5.0.5；minimatch 自身仍有公告。",
+      "declaredParents": [
+        {
+          "parent": "minimatch@11.0.3",
+          "declaredRequirements": ["^5.0.12"],
+          "resolved": "5.0.12",
+          "requirementSource": "Remaining workspace lock snapshot and installed parent manifest after client retirement."
+        }
+      ]
+    },
+    "sharp": {
+      "version": "0.35.5",
+      "introducedBy": "0631ee95e1ee68f3a48fedf2a0725be246892b2e",
+      "reason": "保留；Miniflare 精确0.35.4被覆盖0.35.5；本机原生构建与平台二进制需验证。",
+      "declaredParents": [
+        {
+          "parent": "miniflare@5.20260916.0-alpha",
+          "declaredRequirements": ["0.35.4"],
+          "resolved": "0.35.5",
+          "requirementSource": "Remaining workspace lock snapshot and installed parent manifest after client retirement."
+        }
+      ]
+    },
+    "zod@^4": {
+      "version": "4.6.6",
+      "introducedBy": "debt-remediation-followup-2026-10-31",
+      "reason": "Keep authentication and Neon Zod4 at patched 4.6.6; business Zod3 remains separate and receives only the documented constrained-collection backport.",
+      "declaredParents": [
+        {
+          "parent": "@better-auth/core@1.7.7",
+          "declaredRequirements": ["^4.5.4"],
+          "resolved": "4.6.6",
+          "requirementSource": "Remaining workspace lock snapshot and installed parent manifest after client retirement."
+        },
+        {
+          "parent": "@neon/config@1.7.0",
+          "declaredRequirements": ["^4.4.3"],
+          "resolved": "4.6.6",
+          "requirementSource": "Remaining workspace lock snapshot and installed parent manifest after client retirement."
+        },
+        {
+          "parent": "@neon/env@1.4.1",
+          "declaredRequirements": ["^4.4.3"],
+          "resolved": "4.6.6",
+          "requirementSource": "Remaining workspace lock snapshot and installed parent manifest after client retirement."
+        },
+        {
+          "parent": "better-auth@1.7.7",
+          "declaredRequirements": ["^4.5.4"],
+          "resolved": "4.6.6",
+          "requirementSource": "Remaining workspace lock snapshot and installed parent manifest after client retirement."
+        },
+        {
+          "parent": "better-call@1.4.0",
+          "declaredRequirements": ["^4.0.0"],
+          "resolved": "4.6.6",
+          "requirementSource": "Remaining workspace lock snapshot and installed parent manifest after client retirement."
+        }
+      ]
+    },
+    "stylus>glob": {
+      "version": "14.0.3",
+      "introducedBy": "taro-compatible-maintenance-2026-10-31",
+      "reason": "Explicit tested parent range exception using an official maintained release; final install, H5/weapp production, localhost H5 HTTP/HMR and weapp watch plus parent integration evidence in taro-trial/logs.",
+      "declaredParents": [
+        {
+          "parent": "stylus@0.64.0",
+          "declaredRequirements": ["^10.4.5"],
+          "resolved": "14.0.3",
+          "requirementSource": "Remaining workspace lock snapshot and installed parent manifest after client retirement."
+        }
+      ]
+    },
+    "postcss@^8": {
+      "version": "8.5.32",
+      "introducedBy": "maintenance-close-2026-10-31",
+      "reason": "Use maintained official PostCSS8 patch in actual supported build chains; keep unused legacy PostCSS7 pre-render separate. Installed parents are refreshed after installation.",
+      "declaredParents": [
+        {
+          "parent": "postcss-load-config@6.0.1",
+          "declaredRequirements": [">=8.0.9"],
+          "resolved": "8.5.32",
+          "requirementSource": "Remaining workspace lock snapshot and installed parent manifest after client retirement."
+        },
+        {
+          "parent": "tsup@9.0.0",
+          "declaredRequirements": ["^8.4.12"],
+          "resolved": "8.5.32",
+          "requirementSource": "Remaining workspace lock snapshot and installed parent manifest after client retirement."
+        },
+        {
+          "parent": "vite@7.3.7",
+          "declaredRequirements": ["^8.5.6"],
+          "resolved": "8.5.32",
+          "requirementSource": "Remaining workspace lock snapshot and installed parent manifest after client retirement."
+        }
+      ]
+    }
+  },
+  "removedOverrides": {
+    "tinypool": {
+      "version": "2.1.2",
+      "introducedBy": "a3d8089cb1fb622aacf6938132540c6139c65be2",
+      "reason": "No dependency/optional/peer snapshot or workspace importer resolves tinypool; Vitest 4.1.12 does not declare it. Removed dead override; no package replacement."
+    },
+    "colord": {
+      "version": "2.9.4",
+      "reason": "No final main-workspace snapshot has an actual parent resolving this override target after the maintained toolchain migration; superseded CSS/copy dependencies no longer require this pin. Removed rather than preserving a zero-parent override.",
+      "previousIntroducedBy": "14eecb8e7211673bd259f843388e07c6296337ef"
+    },
+    "brace-expansion@2.1.1": {
+      "version": "2.1.7",
+      "reason": "No final main-workspace snapshot has an actual parent resolving this override target after the maintained toolchain migration; superseded CSS/copy dependencies no longer require this pin. Removed rather than preserving a zero-parent override.",
+      "previousIntroducedBy": "14eecb8e7211673bd259f843388e07c6296337ef"
+    },
+    "postcss-selector-parser@^6": {
+      "version": "6.1.5",
+      "reason": "No final main-workspace snapshot has an actual parent resolving this override target after the maintained toolchain migration; superseded CSS/copy dependencies no longer require this pin. Removed rather than preserving a zero-parent override.",
+      "previousIntroducedBy": "debt-remediation-followup-2026-10-31"
+    },
+    "schema-utils@4.8.1": {
+      "reason": "Old forced4.3.3 pin existed for Webpack5.91; officialschema-utils4.8.1 peer accepts currentWebpack5.112.2.",
+      "removedIn": "maintenance-close-2026-10-31"
+    },
+    "glob@10.2.6": {
+      "reason": "Replaced by verified parent-scoped officialglob14 for doctor/Stylus; old exact pin no longer required.",
+      "removedIn": "maintenance-close-2026-10-31"
+    },
+    "postcss@8.5.15": {
+      "reason": "Replaced by actual parent-compatible PostCSS8 maintained patch selector, no old exact pin needed.",
+      "removedIn": "maintenance-close-2026-10-31"
+    },
+    "node-forge@^1": {
+      "version": "1.4.1",
+      "reason": "After the maintained dev-server/SSL chain migration no installed or lockfile parent resolves node-forge. Remove the dead override instead of inventing a parent record or relaxing validation.",
+      "removedIn": "maintenance-retry-2026-10-31"
+    },
+    "vm2": {
+      "version": "3.12.2",
+      "reason": "Retired apps/web and apps/miniapp by owner decision; no reachable remaining workspace parent declares this edge. Historical repair remains in prior commits.",
+      "removedIn": "ui-retirement-2026-10-31"
+    },
+    "proxy-addr": {
+      "version": "2.0.8",
+      "reason": "Retired apps/web and apps/miniapp by owner decision; no reachable remaining workspace parent declares this edge. Historical repair remains in prior commits.",
+      "removedIn": "ui-retirement-2026-10-31"
+    },
+    "shell-quote": {
+      "version": "1.11.0",
+      "reason": "Retired apps/web and apps/miniapp by owner decision; no reachable remaining workspace parent declares this edge. Historical repair remains in prior commits.",
+      "removedIn": "ui-retirement-2026-10-31"
+    },
+    "axios": {
+      "version": "1.20.0",
+      "reason": "Retired apps/web and apps/miniapp by owner decision; no reachable remaining workspace parent declares this edge. Historical repair remains in prior commits.",
+      "removedIn": "ui-retirement-2026-10-31"
+    },
+    "fast-uri": {
+      "version": "3.1.9",
+      "reason": "Retired apps/web and apps/miniapp by owner decision; no reachable remaining workspace parent declares this edge. Historical repair remains in prior commits.",
+      "removedIn": "ui-retirement-2026-10-31"
+    },
+    "compression": {
+      "version": "1.8.2",
+      "reason": "Retired apps/web and apps/miniapp by owner decision; no reachable remaining workspace parent declares this edge. Historical repair remains in prior commits.",
+      "removedIn": "ui-retirement-2026-10-31"
+    },
+    "joi": {
+      "version": "17.13.9",
+      "reason": "Retired apps/web and apps/miniapp by owner decision; no reachable remaining workspace parent declares this edge. Historical repair remains in prior commits.",
+      "removedIn": "ui-retirement-2026-10-31"
+    },
+    "js-yaml": {
+      "version": "4.3.2",
+      "reason": "Retired apps/web and apps/miniapp by owner decision; no reachable remaining workspace parent declares this edge. Historical repair remains in prior commits.",
+      "removedIn": "ui-retirement-2026-10-31"
+    },
+    "lodash-es": {
+      "version": "4.18.0",
+      "reason": "Retired apps/web and apps/miniapp by owner decision; no reachable remaining workspace parent declares this edge. Historical repair remains in prior commits.",
+      "removedIn": "ui-retirement-2026-10-31"
+    },
+    "svgo": {
+      "version": "3.3.5",
+      "reason": "Retired apps/web and apps/miniapp by owner decision; no reachable remaining workspace parent declares this edge. Historical repair remains in prior commits.",
+      "removedIn": "ui-retirement-2026-10-31"
+    },
+    "body-parser": {
+      "version": "1.20.9",
+      "reason": "Retired apps/web and apps/miniapp by owner decision; no reachable remaining workspace parent declares this edge. Historical repair remains in prior commits.",
+      "removedIn": "ui-retirement-2026-10-31"
+    },
+    "http-proxy-middleware": {
+      "version": "2.0.10",
+      "reason": "Retired apps/web and apps/miniapp by owner decision; no reachable remaining workspace parent declares this edge. Historical repair remains in prior commits.",
+      "removedIn": "ui-retirement-2026-10-31"
+    },
+    "qs": {
+      "version": "6.16.1",
+      "reason": "Retired apps/web and apps/miniapp by owner decision; no reachable remaining workspace parent declares this edge. Historical repair remains in prior commits.",
+      "removedIn": "ui-retirement-2026-10-31"
+    },
+    "postcss-selector-parser@7.1.4": {
+      "version": "7.1.6",
+      "reason": "Retired apps/web and apps/miniapp by owner decision; no reachable remaining workspace parent declares this edge. Historical repair remains in prior commits.",
+      "removedIn": "ui-retirement-2026-10-31"
+    },
+    "swiper": {
+      "version": "12.1.2",
+      "reason": "Retired apps/web and apps/miniapp by owner decision; no reachable remaining workspace parent declares this edge. Historical repair remains in prior commits.",
+      "removedIn": "ui-retirement-2026-10-31"
+    },
+    "adm-zip": {
+      "version": "0.6.1",
+      "reason": "Retired apps/web and apps/miniapp by owner decision; no reachable remaining workspace parent declares this edge. Historical repair remains in prior commits.",
+      "removedIn": "ui-retirement-2026-10-31"
+    },
+    "follow-redirects@^1": {
+      "version": "1.16.2",
+      "reason": "Retired apps/web and apps/miniapp by owner decision; no reachable remaining workspace parent declares this edge. Historical repair remains in prior commits.",
+      "removedIn": "ui-retirement-2026-10-31"
+    },
+    "launch-editor@^2": {
+      "version": "2.14.2",
+      "reason": "Retired apps/web and apps/miniapp by owner decision; no reachable remaining workspace parent declares this edge. Historical repair remains in prior commits.",
+      "removedIn": "ui-retirement-2026-10-31"
+    },
+    "decode-uri-component@^0.4.1": {
+      "version": "0.5.1",
+      "reason": "Retired apps/web and apps/miniapp by owner decision; no reachable remaining workspace parent declares this edge. Historical repair remains in prior commits.",
+      "removedIn": "ui-retirement-2026-10-31"
+    },
+    "@tarojs/webpack5-runner>webpack-dev-server": {
+      "version": "5.2.7",
+      "reason": "Retired apps/web and apps/miniapp by owner decision; no reachable remaining workspace parent declares this edge. Historical repair remains in prior commits.",
+      "removedIn": "ui-retirement-2026-10-31"
+    },
+    "@tarojs/webpack5-runner>copy-webpack-plugin": {
+      "version": "14.0.0",
+      "reason": "Retired apps/web and apps/miniapp by owner decision; no reachable remaining workspace parent declares this edge. Historical repair remains in prior commits.",
+      "removedIn": "ui-retirement-2026-10-31"
+    },
+    "@tarojs/webpack5-runner>css-minimizer-webpack-plugin": {
+      "version": "8.0.0",
+      "reason": "Retired apps/web and apps/miniapp by owner decision; no reachable remaining workspace parent declares this edge. Historical repair remains in prior commits.",
+      "removedIn": "ui-retirement-2026-10-31"
+    },
+    "serialize-javascript@^7": {
+      "version": "7.1.4",
+      "reason": "Retired apps/web and apps/miniapp by owner decision; no reachable remaining workspace parent declares this edge. Historical repair remains in prior commits.",
+      "removedIn": "ui-retirement-2026-10-31"
+    },
+    "@tarojs/cli>download-git-repo": {
+      "version": "-",
+      "reason": "Retired apps/web and apps/miniapp by owner decision; no reachable remaining workspace parent declares this edge. Historical repair remains in prior commits.",
+      "removedIn": "ui-retirement-2026-10-31"
+    },
+    "@tarojs/cli>latest-version": {
+      "version": "-",
+      "reason": "Retired apps/web and apps/miniapp by owner decision; no reachable remaining workspace parent declares this edge. Historical repair remains in prior commits.",
+      "removedIn": "ui-retirement-2026-10-31"
+    },
+    "@tarojs/webpack5-runner>webpackbar": {
+      "version": "7.0.0",
+      "reason": "Retired apps/web and apps/miniapp by owner decision; no reachable remaining workspace parent declares this edge. Historical repair remains in prior commits.",
+      "removedIn": "ui-retirement-2026-10-31"
+    },
+    "@tarojs/plugin-doctor>glob": {
+      "version": "14.0.3",
+      "reason": "Retired apps/web and apps/miniapp by owner decision; no reachable remaining workspace parent declares this edge. Historical repair remains in prior commits.",
+      "removedIn": "ui-retirement-2026-10-31"
+    },
+    "webpack@5.91.0": {
+      "version": "5.112.2",
+      "reason": "Retired apps/web and apps/miniapp by owner decision; no reachable remaining workspace parent declares this edge. Historical repair remains in prior commits.",
+      "removedIn": "ui-retirement-2026-10-31"
+    },
+    "miniprogram-simulate>postcss": {
+      "version": "8.5.32",
+      "reason": "Retired apps/web and apps/miniapp by owner decision; no reachable remaining workspace parent declares this edge. Historical repair remains in prior commits.",
+      "removedIn": "ui-retirement-2026-10-31"
+    },
+    "brace-expansion@1.1.15": {
+      "version": "1.1.21",
+      "reason": "After lock regeneration no remaining installed parent resolves this exact target; obsolete Taro-specific snapshot eliminated.",
+      "removedIn": "ui-retirement-2026-10-31"
+    }
+  },
+  "patches": {
+    "zod@3.25.76": {
+      "path": "patches/zod@3.25.76.patch",
+      "advisory": "GHSA-mrhx-c7xc-m3w5",
+      "upstream": "https://github.com/colinhacks/zod/commit/a0ebf97",
+      "license": "MIT",
+      "kind": "upstream_backport",
+      "files": ["src/v3/types.ts", "v3/types.js", "v3/types.cjs"],
+      "behavior": "Abort constrained arrays above max/exact length and sets above max size before allocating per-element parse results; keep existing Zod3 issue fields and default messages. Bounded parse/error/JSON behavior is unchanged.",
+      "limits": "No arbitrary limit on unbounded arrays/maps/sets. Zod3 has no map max/size API. Bundled unused zod/v4 entry in this v3 distribution is not backported. Version-based audit will continue to flag 3.25.76.",
+      "validation": "apps/api/test/dependencies-backport.test.ts; installed bounded collections, unchanged error contracts and structured outputs were verified. Final installed behavior, full regression, application/Worker and retained H5/weapp build/watch evidence: docs/execution/maintenance-and-repository-cleanup-2026-10-31.md#7. Revalidate after changing the patch or parent chain; no audit exclusion.",
+      "sha256": "78e0b2a64f711e04185ec0eb0f32c0d8df7e71ab2cf0ccaf658414cceb171c56"
+    }
+  },
+  "directUpgrades": {
+    "@hono/node-server": {
+      "workspace": "apps/api",
+      "from": "1.19.17",
+      "version": "2.1.5",
+      "source": "https://registry.npmjs.org/@hono%2fnode-server/2.1.5",
+      "reason": "Coordinator verified published Hono4/5 peers and installed 2.1.5. Node serve/getRequestListener and frozen dogfood serveStatic imports are preserved.",
+      "validation": "apps/api/test/dependency-runtime.test.ts exercises synthetic Node HTTP request adaptation without listening, static GET/HEAD/range/fallback, and encoded-path middleware alignment. No DB or production access."
+    }
+  },
+  "packageExtensions": {
+    "better-call@1.4.0": {
+      "dependencies": {
+        "zod": "^4.0.0"
+      },
+      "reason": "Honor the actual authentication helper published Zod4 peer within its own package edge; business Zod3 stays unchanged. Auth HTTP/database and installed-parent checks validate separation."
+    }
+  },
+  "retiredToolchain": {
+    "date": "2026-10-31",
+    "clients": ["apps/web", "apps/miniapp"],
+    "removedPatchFiles": [
+      "patches/@tarojs__cli@4.3.0.patch",
+      "patches/@tarojs__webpack5-runner@4.3.0.patch",
+      "patches/html-minifier@4.0.0.patch",
+      "patches/miniprogram-simulate@1.6.1.patch"
+    ],
+    "evidence": "docs/execution/ui-retirement-2026-10-31.md"
+  },
+  "auditObservation": {
+    "date": "2026-10-31",
+    "command": "pnpm audit --json",
+    "records": 2,
+    "affectedVersionCounts": {
+      "info": 0,
+      "low": 0,
+      "moderate": 1,
+      "high": 1,
+      "critical": 0
+    },
+    "exit": 1,
+    "interpretation": "Version scan is not suppressed. Retained Zod3 constrained-collection source backport is recorded by hash and regression; esbuild serve advisory remains on an unused server API in build-time dependencies. Retired Taro-specific packages are absent, not ignored.",
+    "evidence": "docs/execution/ui-retirement-2026-10-31.md"
+  }
+}

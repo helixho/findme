@@ -1,0 +1,78 @@
+{
+  "name": "helix-findme",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@9.15.9",
+  "scripts": {
+    "dev:api": "pnpm --filter @findme/api dev",
+    "dev:app": "pnpm --filter @findme/app dev",
+    "av:dogfood": "pnpm --filter @findme/api av:dogfood",
+    "build": "pnpm -r build",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "test": "node scripts/test.mjs all",
+    "test:local": "node scripts/test.mjs local",
+    "test:db": "node scripts/test.mjs db",
+    "test:runner": "node --test scripts/test-runner.test.mjs",
+    "db:generate": "pnpm --filter @findme/db generate",
+    "db:migrate": "pnpm --filter @findme/db migrate",
+    "cf:dev": "wrangler dev",
+    "cf:deploy": "wrangler deploy",
+    "app:open": "bash scripts/open-app.sh",
+    "app:deploy": "pnpm --filter @findme/app build && wrangler deploy --config wrangler.app.jsonc",
+    "av:layers": "pnpm --filter @findme/api av:layers",
+    "av:layers:view": "pnpm --filter @findme/api av:layers:view",
+    "diagnostic:reason": "pnpm --filter @findme/api diagnostic:reason",
+    "av:coverage": "pnpm --filter @findme/api av:coverage",
+    "understanding:baseline": "pnpm --filter @findme/api understanding:baseline",
+    "test:fast": "node scripts/test.mjs fast",
+    "test:app": "node scripts/test.mjs app",
+    "test:browser": "node scripts/test-browser.mjs all",
+    "test:browser:synthetic": "node scripts/test-browser.mjs synthetic",
+    "test:browser:real": "node scripts/test-browser.mjs real",
+    "test:coverage:local": "node scripts/test.mjs coverage local",
+    "test:coverage:db": "node scripts/test.mjs coverage db",
+    "policy:inspect": "pnpm --filter @findme/api exec tsx scripts/policy-inspect.ts",
+    "test:browser:maintenance": "node scripts/test-maintenance-browser.mjs",
+    "check:repo": "node scripts/check-repository.mjs"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "catalog:",
+    "@cloudflare/workers-types": "^5.20260917.1",
+    "@neon/config": "^1.7.0",
+    "@neon/env": "^1.4.1",
+    "@playwright/test": "1.64.1",
+    "@vitest/coverage-v8": "4.1.12",
+    "typescript": "catalog:",
+    "wrangler": "^4.133.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "seroval": "1.6.11",
+      "browserslist": "4.28.7",
+      "immutable": "5.1.8",
+      "undici": "7.30.1",
+      "source-map-js": "1.2.2",
+      "form-data": "4.0.6",
+      "nanoid": "3.3.18",
+      "brace-expansion@5.0.6": "5.0.12",
+      "sharp": "0.35.5",
+      "zod@^4": "4.6.6",
+      "stylus>glob": "14.0.3",
+      "postcss@^8": "8.5.32"
+    },
+    "packageExtensions": {
+      "better-call@1.4.0": {
+        "dependencies": {
+          "zod": "^4.0.0"
+        }
+      }
+    },
+    "patchedDependencies": {
+      "zod@3.25.76": "patches/zod@3.25.76.patch"
+    }
+  }
+}

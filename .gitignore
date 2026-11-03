@@ -1,0 +1,46 @@
+# --- secrets ---
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+
+# --- node / pnpm ---
+node_modules/
+.pnpm-store/
+dist/
+build/
+*.tsbuildinfo
+
+# --- vite / next build ---
+.vite/
+apps/*/.cache/
+
+# --- data / backups(根级本地卷,不入库;根锚点避免误吞 src/data 等子目录) ---
+/data/
+/backups/
+/uploads/
+*.dump
+*.sql.gz
+*.tar.gz.gpg
+
+# --- test / tooling ---
+coverage/
+.turbo/
+.wrangler/
+
+# --- local runtime logs ---
+*.log
+/logs/
+
+# --- os / editor / agent ---
+.DS_Store
+.idea/
+.vscode/
+# 本机 agent harness 配置(settings.local.json 含个人偏好),不入库
+.claude/
+.neon
+
+playwright-report/
+
+test-results/
