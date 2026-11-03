@@ -309,6 +309,7 @@ export const claimRevisions = pgTable(
     confidenceLevel: text("confidence_level").notNull(),
     confidenceBasis: text("confidence_basis").notNull(),
     revisionReason: text("revision_reason"),
+    details: jsonb("details").$type<Record<string, unknown>>().default({}).notNull(),
     invalidatedAt: timestamp("invalidated_at", { withTimezone: true }),
     invalidationReason: text("invalidation_reason"),
     supersedesRevisionId: uuid("supersedes_revision_id"),

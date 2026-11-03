@@ -6,6 +6,7 @@ import {
   prepareExportRestore,
 } from "../cloud-diagnostic/ingest-adapter.js";
 import type { CloudServices } from "../cloud-diagnostic/runtime.js";
+import { prepareUnderstandingImport } from "../cloud-diagnostic/understanding-import.js";
 import type { PersonalContext } from "../core/exploration-service.js";
 import { frameworkRoutes } from "../framework-runtime/routes.js";
 import type { PrincipalResolver } from "./core.js";
@@ -44,6 +45,32 @@ export function cloudDataRoutes(
   );
   app.post("/sources/:id/rebind", async (c) =>
     c.json(await services.lifecycle.rebind(await contextFor(c), id(c), await c.req.json(), key(c))),
+  );
+  app.post("/understanding-imports/preview", async (c) => {
+    await contextFor(c);
+    const { input_hash, summary } = await prepareUnderstandingImport(await c.req.json());
+    return c.json({ input_hash, ...summary });
+  });
+  app.post("/understanding-imports", async (c) => {
+    const input = z
+      .object({
+        bundle: z.unknown(),
+        input_hash: z.string().regex(/^[a-f0-9]{64}$/),
+        confirm: z.literal(true),
+      })
+      .strict()
+      .parse(await c.req.json());
+    return c.json(
+      await services.understandingImport.commit(
+        await contextFor(c),
+        input.bundle,
+        input.input_hash,
+      ),
+      201,
+    );
+  });
+  app.get("/understanding-imports/:id", async (c) =>
+    c.json(await services.understandingImport.read(await contextFor(c), id(c))),
   );
   app.post("/imports/prepare", async (c) => {
     await contextFor(c);

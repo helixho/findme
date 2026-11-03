@@ -171,3 +171,10 @@ export type {
   TrialExecution,
   TrialOutcome,
 } from "./specialist.js";
+
+export {
+  UnderstandingDomain,
+  UnderstandingDimensions,
+  UnderstandingImport,
+  StoredUnderstandingDetails,
+} from "./understanding-import.js";

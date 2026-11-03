@@ -113,6 +113,7 @@ CREATE TABLE public.claim_revisions (
     confidence_level text NOT NULL,
     confidence_basis text NOT NULL,
     revision_reason text,
+    details jsonb DEFAULT '{}'::jsonb NOT NULL,
     supersedes_revision_id uuid,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     evidence_status text DEFAULT 'valid'::text NOT NULL,

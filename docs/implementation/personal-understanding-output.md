@@ -46,16 +46,16 @@ HUMAN 3.0的Mind可关联认知/情绪，Body关联身体/恢复，Spirit涉及�
 | --- | --- | --- |
 | 稳定认识身份与修订 | `claims`、`claim_revisions`；ClaimKind/Mode/Status；文字scope、修订原因和证据状态 | 不另造画像库；结合后续分类与范围变化维护身份和版本 |
 | 来源与证据 | `source_items`、`evidence_spans`、`claim_evidence`已有支持/挑战/背景与独立组 | 复用，不为每个框架复制；继续核对实际语义支持和来源归属 |
-| 生活领域 | 诊断domain、知识topic及framework domain各有局部语义 | 尚无原生认识的统一、多选领域归属；补分类版本、关联依据与覆盖投影，不直接套用某个框架枚举 |
+| 生活领域 | 诊断domain、知识topic及framework domain各有局部语义 | 固定会话导入已通过claim_revisions.details保存多选领域；普通生成尚未贯通分类版本、关联依据和覆盖投影，不直接套用某个框架枚举 |
 | 内容分型 | ClaimKind含background/pattern/value/worldview/life_orientation/interpretation；事件context及专项对象承接部分目标/状态 | 目标、资源、能力、约束、自我叙事的通用结构表达不足；先复用已有对象，必要时补语义分面和校验，不能只随意扩一个字符串 |
-| 情境与有效时间 | 来源/经历有时间，认识有文字scope和created_at | 认识适用时段、时间精度与项目/角色/场景需可查询关联；created_at不能充当有效时间 |
-| 认识间关系 | EvidenceLink已连接证据与认识；报告有nodes/links，设计中已有解释竞争 | 需可修订的认识间关系、端点版本、依据与失效传播；不能把报告局部关系视为已有通用图谱 |
+| 情境与有效时间 | 来源/经历有时间，认识有文字scope和created_at | 固定导入的details已有有效时段/精度与项目/角色/场景；普通生成及查询仍需接续，created_at不能充当有效时间 |
+| 认识间关系 | EvidenceLink已连接证据与认识；报告有nodes/links，设计中已有解释竞争 | 固定导入的details绑定较早的确切修订，并继承来源依赖；尚无通用关系编辑/查询接口，不能把局部关系视为完整图谱 |
 | 分析结构 | Insight Analysis设计、诊断/理解报告已有相关字段；Gap承接未决问题 | 将分析中的引用角色与确切认识修订关联，避免报告、对话和专题各自维护判断 |
-| 本人反馈 | Core有纠正类型；知识专题有fact_correction/interpretation_disagreement/temporal_change/utility_feedback等局部分类 | 尚未统一事实认可、解释认同、启发性、建议效用和异议；绑定反馈目标版本，允许原话优先、用途未知，不增加每轮必填问卷 |
+| 本人反馈 | Core有纠正类型；知识专题有fact_correction/interpretation_disagreement/temporal_change/utility_feedback等局部分类 | 固定导入已表达事实认可、解释认同、启发性、建议效用、异议与未明用途并绑定目标；普通交互尚未统一。用途为导入声明，不自动确认认识，不增加每轮必填问卷 |
 | 框架结果 | FrameworkDefinition/Run/Result已有版本、领域、level/phase和综合结构 | 原生认识与框架结果映射、依据引用及失效接续仍需贯通；HUMAN 3.0内部定义仍是草稿，不能当正式测评 |
 | 目标与行动反馈 | 领域已有Goal/Action概念，专项路径有建议、尝试和回顾 | 通用跨领域目标/行动到认识的关系尚需贯通，不另做待办系统 |
 
-先补生活领域关联、结构化适用范围、认识关系及反馈用途这四类信息；内容分型按实际样例补足，框架结果优先复用。物理schema、迁移和界面字段待实施设计，不在方法阶段先固定一堆表。
+先补生活领域关联、结构化适用范围、认识关系及反馈用途这四类信息；内容分型按实际样例补足，框架结果优先复用。已落实的固定导入仅增加一个修订details字段，复用来源、认识、证据和反馈表；普通生成、编辑及界面仍按具体功能接续。代码能力见[As-Is §17](../as-is.md#17-固定会话与已有洞察的导入代码)。
 
 ## 5. 可公开的结构示例
 

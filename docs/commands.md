@@ -220,3 +220,13 @@ AV 加工归档准备器：在 `apps/api` 下执行 `node --import tsx scripts/p
 ### 仓库引用检查
 
 `node scripts/check-repository.mjs` 只读检查受跟踪 Markdown 的相对链接/锚点、HTML/CSS 静态引用和 Web manifest 图标，不读取 `.env`、私人语料或连接服务。动态 hash 路由交由既有浏览器回归验证；它不证明链接中的外部网站在线，也不替代产品或迁移测试。检查器回归可用 `node scripts/test.mjs local cleanup`。
+
+## 对话与已有理解导入
+
+`apps/api/scripts/prepare-understanding-import.ts --input ABS_JSON --out NEW_ABS_DIR`在本机校验`findme-understanding-import@1`包，输出规范化`bundle.json`和只含哈希/数量的manifest。经`pnpm --filter @findme/api exec tsx scripts/prepare-understanding-import.ts ...`运行；输入与输出必须用绝对路径，输出目录须为仓库外的新目录。命令不连接数据库、不调用模型，不把私人正文写入日志或Git。
+
+账号API提供`POST /api/data/understanding-imports/preview`（输入bundle，返回校验哈希和数量）、`POST /api/data/understanding-imports`（`bundle`、预览的`input_hash`、`confirm: true`）及`GET /api/data/understanding-imports/:id`读回。保存使用认证Profile事务；同一namespace同内容重放返回原回执，不重复创建；同namespace不同内容拒绝覆盖。此入口导入一个固定会话快照及其中已有的修订历史，不是跨快照自动合并器。
+
+原始用户/助手发言分别保存为来源；助手洞察只存为候选或明确的历史状态，不自动进入当前认识，不将总体认可拆成逐条确认。来源片段以UTF-16位置精确核对；修订的领域/内容类型/分析作用、情境、有效时间与认识关系保存在`claim_revisions.details`，反馈引用原始用户来源与目标版本。模型尚未推理、数据库未处理与本人未确认分别表达。
+
+现有数据库需要先具备`claim_revisions.details`列，才可部署使用该入口。当前结构定义在`packages/db/schema.sql`；部署不会自动修改已有库，需要数据库所有者在明确授权的更新中添加JSONB列及空对象默认值。新库按当前定义创建，不恢复旧迁移历史或清空旧库。

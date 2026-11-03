@@ -149,6 +149,7 @@ export async function invalidateCloudSources(
           .set({
             text: "",
             scope: "",
+            details: {},
             confidenceBasis: "",
             revisionReason: "source_deleted",
             status: "withdrawn",
@@ -284,6 +285,7 @@ async function redactPriorUsers(
     .set({
       text: "",
       scope: "",
+      details: {},
       confidenceBasis: "",
       revisionReason: "source_deleted",
       evidenceStatus: "invalid",

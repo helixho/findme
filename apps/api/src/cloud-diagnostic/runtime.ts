@@ -16,6 +16,7 @@ import {
 } from "./processing.js";
 import { ProfilePurgeService } from "./purge.js";
 import { CloudDiagnosticRepository } from "./repository.js";
+import { UnderstandingImportService } from "./understanding-import.js";
 export function createCloudServices(options: {
   db: Db;
   identityDb: Db;
@@ -36,6 +37,7 @@ export function createCloudServices(options: {
     blobs: new CloudBlobService(db, options.blobs),
     lifecycle: new CloudLifecycleService(db),
     ingest: new CoreIngestService(db),
+    understandingImport: new UnderstandingImportService(db),
     export: new CloudExportService(db),
     purge: new ProfilePurgeService(db, options.blobs),
     framework(ctx: PersonalContext, callCap = 0) {
