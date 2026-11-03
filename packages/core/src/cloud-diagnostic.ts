@@ -67,6 +67,7 @@ export const CloudBlobDeclaration = z
       "text/plain",
       "application/pdf",
     ]),
+    file_name: z.string().trim().min(1).max(255).optional(),
   })
   .strict();
 export type CloudDiagnosticCreate = z.infer<typeof CloudDiagnosticCreate>;

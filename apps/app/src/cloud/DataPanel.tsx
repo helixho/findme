@@ -309,7 +309,7 @@ export function DataPanel() {
                     : file.type || "text/plain";
                   const declared = await cloudMutation<{ id: string; status: string }>(
                     "/api/blobs",
-                    { content_sha256, byte_length: file.size, media_type },
+                    { content_sha256, byte_length: file.size, media_type, file_name: file.name },
                   );
                   if (declared.status === "declared")
                     await cloudFile(`/api/blobs/${declared.id}/content`, {

@@ -1,6 +1,7 @@
 import { type Db, coreSchema, specialistSchema } from "@findme/db";
 import { and, eq, inArray } from "drizzle-orm";
 import type { PersonalContext } from "../core/exploration-service.js";
+import { digest } from "../shared/primitives.js";
 import type { DecisionInput, ReviewInput } from "./contracts.js";
 import { executionLabels, outcomeLabels } from "./policy.js";
 import { ownedProposal, ownedTrial } from "./repository.js";
@@ -39,6 +40,16 @@ export async function transitionTrial(
 export async function reviewTrial(db: Db, ctx: PersonalContext, id: string, body: ReviewInput) {
   const trial = await ownedTrial(db, ctx, id);
   if (!trial) return result({ error: "trial_not_found" }, 404);
+  const selfReportText = [
+    "本人行动尝试回顾",
+    `执行情况：${executionLabels[body.execution]}。`,
+    `实际作用：${outcomeLabels[body.outcome]}。`,
+    ...(body.burden ? [`本人报告的负担：${body.burden}。`] : []),
+    ...(body.observation ? [`本人记录的观察：${body.observation}`] : []),
+    `后续选择：${body.continue_trial ? "继续尝试" : "结束本次尝试"}。`,
+  ].join("\n");
+  // The wording lives only in the review source; history keeps its hash for replay checks.
+  const selfReportHash = digest(selfReportText);
   // A lost HTTP response must not append another personal source or feedback event.
   const lastReview = trial.reviewHistory.at(-1);
   if (
@@ -47,8 +58,7 @@ export async function reviewTrial(db: Db, ctx: PersonalContext, id: string, body
     lastReview.prior_trial_version === body.expected_version &&
     lastReview.execution === body.execution &&
     lastReview.outcome === body.outcome &&
-    lastReview.burden === (body.burden ?? null) &&
-    lastReview.observation === (body.observation ?? null) &&
+    lastReview.self_report_hash === selfReportHash &&
     lastReview.continue_trial === body.continue_trial &&
     lastReview.related_claim_revision_id === (body.related_claim_revision_id ?? null)
   ) {
@@ -87,14 +97,6 @@ export async function reviewTrial(db: Db, ctx: PersonalContext, id: string, body
     return result({ error: "related_claim_not_found" }, 404);
   const now = new Date();
   const reviewVersion = trial.version + 1;
-  const selfReportText = [
-    "本人行动尝试回顾",
-    `执行情况：${executionLabels[body.execution]}。`,
-    `实际作用：${outcomeLabels[body.outcome]}。`,
-    ...(body.burden ? [`本人报告的负担：${body.burden}。`] : []),
-    ...(body.observation ? [`本人记录的观察：${body.observation}`] : []),
-    `后续选择：${body.continue_trial ? "继续尝试" : "结束本次尝试"}。`,
-  ].join("\n");
   const saved = await db.transaction(async (tx) => {
     const [lockedTrial] = await tx
       .select()
@@ -150,8 +152,7 @@ export async function reviewTrial(db: Db, ctx: PersonalContext, id: string, body
       prior_trial_version: lockedTrial.version,
       execution: body.execution,
       outcome: body.outcome,
-      burden: body.burden ?? null,
-      observation: body.observation ?? null,
+      self_report_hash: selfReportHash,
       continue_trial: body.continue_trial,
       reviewed_at: now.toISOString(),
       source_id: source.id,
@@ -166,8 +167,6 @@ export async function reviewTrial(db: Db, ctx: PersonalContext, id: string, body
         version: reviewVersion,
         latestExecution: body.execution,
         latestOutcome: body.outcome,
-        latestBurden: body.burden ?? null,
-        latestObservation: body.observation ?? null,
         continueTrial: body.continue_trial ? "yes" : "no",
         reviewedAt: now,
         reviewHistory: [...trial.reviewHistory, review],

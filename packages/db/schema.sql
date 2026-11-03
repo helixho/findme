@@ -478,6 +478,7 @@ CREATE TABLE public.source_blobs (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     tenant_id uuid NOT NULL,
     subject_id uuid NOT NULL,
+    source_item_id uuid NOT NULL,
     object_key text NOT NULL,
     content_sha256 text NOT NULL,
     byte_length integer NOT NULL,
@@ -564,15 +565,10 @@ CREATE TABLE public.specialist_sessions (
     idempotency_key text NOT NULL,
     status text DEFAULT 'open'::text NOT NULL,
     version integer DEFAULT 1 NOT NULL,
-    goal text,
-    setting text,
-    difficulty text,
+    context_source_id uuid,
     difficulty_categories jsonb DEFAULT '[]'::jsonb NOT NULL,
     scope_flags jsonb DEFAULT '[]'::jsonb NOT NULL,
-    environment text,
     environment_categories jsonb DEFAULT '[]'::jsonb NOT NULL,
-    existing_supports text,
-    burden text,
     self_reported_diagnosis text,
     skipped_steps jsonb DEFAULT '[]'::jsonb NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
@@ -598,8 +594,6 @@ CREATE TABLE public.specialist_trials (
     accepted_at timestamp with time zone DEFAULT now() NOT NULL,
     latest_execution text,
     latest_outcome text,
-    latest_burden text,
-    latest_observation text,
     continue_trial text,
     reviewed_at timestamp with time zone,
     review_history jsonb DEFAULT '[]'::jsonb NOT NULL,
@@ -1156,3 +1150,9 @@ ALTER TABLE public.specialist_sessions ENABLE ROW LEVEL SECURITY;
 CREATE POLICY specialist_trial_scope ON public.specialist_trials USING ((((tenant_id)::text = current_setting('app.tenant_id'::text, true)) AND ((subject_id)::text = current_setting('app.subject_id'::text, true)))) WITH CHECK ((((tenant_id)::text = current_setting('app.tenant_id'::text, true)) AND ((subject_id)::text = current_setting('app.subject_id'::text, true))));
 
 ALTER TABLE public.specialist_trials ENABLE ROW LEVEL SECURITY;
+
+ALTER TABLE ONLY public.source_blobs
+    ADD CONSTRAINT source_blobs_source_item_id_source_items_id_fk FOREIGN KEY (source_item_id) REFERENCES public.source_items(id);
+
+ALTER TABLE ONLY public.specialist_sessions
+    ADD CONSTRAINT specialist_sessions_context_source_id_source_items_id_fk FOREIGN KEY (context_source_id) REFERENCES public.source_items(id);

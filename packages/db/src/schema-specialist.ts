@@ -13,7 +13,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
-import { subjects } from "./schema-core";
+import { sourceItems, subjects } from "./schema-core";
 
 const id = () => uuid("id").primaryKey().defaultRandom();
 const createdAt = () => timestamp("created_at", { withTimezone: true }).defaultNow().notNull();
@@ -37,15 +37,11 @@ export const specialistSessions = pgTable(
     idempotencyKey: text("idempotency_key").notNull(),
     status: text("status").default("open").notNull(),
     version: integer("version").default(1).notNull(),
-    goal: text("goal"),
-    setting: text("setting"),
-    difficulty: text("difficulty"),
+    /** The person's own wording lives in this source; the session keeps only structured choices. */
+    contextSourceId: uuid("context_source_id").references(() => sourceItems.id),
     difficultyCategories: jsonb("difficulty_categories").$type<string[]>().default([]).notNull(),
     scopeFlags: jsonb("scope_flags").$type<string[]>().default([]).notNull(),
-    environment: text("environment"),
     environmentCategories: jsonb("environment_categories").$type<string[]>().default([]).notNull(),
-    existingSupports: text("existing_supports"),
-    burden: text("burden"),
     selfReportedDiagnosis: text("self_reported_diagnosis"),
     skippedSteps: jsonb("skipped_steps").$type<string[]>().default([]).notNull(),
     createdAt: createdAt(),
@@ -160,8 +156,6 @@ export const specialistTrials = pgTable(
     acceptedAt: timestamp("accepted_at", { withTimezone: true }).defaultNow().notNull(),
     latestExecution: text("latest_execution"),
     latestOutcome: text("latest_outcome"),
-    latestBurden: text("latest_burden"),
-    latestObservation: text("latest_observation"),
     continueTrial: text("continue_trial"),
     reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
     reviewHistory: jsonb("review_history").$type<Record<string, unknown>[]>().default([]).notNull(),

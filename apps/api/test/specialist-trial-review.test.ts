@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { Db, specialistSchema } from "@findme/db";
 import { describe, expect, it, vi } from "vitest";
+import { digest } from "../src/shared/primitives.js";
+import { executionLabels, outcomeLabels } from "../src/specialist/policy.js";
 import { ownedTrial } from "../src/specialist/repository.js";
 import { reviewTrial } from "../src/specialist/trials.js";
 
@@ -38,8 +40,15 @@ describe("specialist review state / mocked repository, no PostgreSQL", () => {
         {
           ...input,
           prior_trial_version: 2,
-          burden: null,
-          observation: null,
+          // Wording is in the review source; history keeps only its hash.
+          self_report_hash: digest(
+            [
+              "本人行动尝试回顾",
+              `执行情况：${executionLabels.completed}。`,
+              `实际作用：${outcomeLabels.helpful}。`,
+              "后续选择：结束本次尝试。",
+            ].join("\n"),
+          ),
           related_claim_revision_id: null,
           source_id: source.id,
         },

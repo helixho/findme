@@ -207,6 +207,10 @@ export const sourceBlobs = pgTable(
   {
     id: id(),
     ...scope(),
+    /** Every original file belongs to one source record; the file itself is its attachment. */
+    sourceItemId: uuid("source_item_id")
+      .notNull()
+      .references(() => sourceItems.id),
     objectKey: text("object_key").notNull(),
     contentSha256: text("content_sha256").notNull(),
     byteLength: integer("byte_length").notNull(),

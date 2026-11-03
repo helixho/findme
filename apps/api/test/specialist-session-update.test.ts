@@ -10,11 +10,40 @@ import { specialistRoutes } from "../src/routes/specialist.js";
 vi.mock("../src/cloud-diagnostic/scope.js", () => ({
   withProfileTransaction: async (db: Db, _ctx: unknown, work: (db: Db) => unknown) => work(db),
 }));
+// Session wording lives in personal sources; an in-memory store stands in for source_items.
+const sources = new Map<string, { id: string; sourceMeta: Record<string, unknown> }>();
+vi.mock("../src/core/personal-source.js", () => ({
+  readPersonalSources: async (_db: Db, _ctx: unknown, ids: string[]) =>
+    new Map(ids.flatMap((id) => (sources.has(id) ? [[id, sources.get(id)]] : []))),
+  recordPersonalSource: async (
+    _db: Db,
+    _ctx: unknown,
+    input: { meta: Record<string, unknown> },
+  ) => {
+    const source = { id: randomUUID(), sourceMeta: input.meta };
+    sources.set(source.id, source);
+    return source;
+  },
+}));
 const dialect = new PgDialect();
 function fixture() {
   const tenantId = randomUUID();
   const subjectId = randomUUID();
   const id = randomUUID();
+  const contextSourceId = randomUUID();
+  sources.set(contextSourceId, {
+    id: contextSourceId,
+    sourceMeta: {
+      fields: {
+        goal: "开始任务",
+        setting: null,
+        difficulty: null,
+        environment: null,
+        existingSupports: null,
+        burden: null,
+      },
+    },
+  });
   let row: Record<string, unknown> = {
     id,
     tenantId,
@@ -22,14 +51,9 @@ function fixture() {
     pathway: "adhd",
     status: "open",
     version: 1,
-    goal: "开始任务",
-    setting: null,
-    difficulty: null,
+    contextSourceId,
     difficultyCategories: [],
-    environment: null,
     environmentCategories: [],
-    existingSupports: null,
-    burden: null,
     selfReportedDiagnosis: null,
     scopeFlags: [],
     skippedSteps: ["setting"],

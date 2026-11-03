@@ -347,6 +347,15 @@ export class ProfilePurgeService {
               eq(d.diagnosticRuns.subjectId, ctx.subjectId),
             ),
           );
+        // Originals and session contexts reference their sources; remove them first.
+        await tx
+          .delete(d.sourceBlobs)
+          .where(
+            and(
+              eq(d.sourceBlobs.tenantId, ctx.tenantId),
+              eq(d.sourceBlobs.subjectId, ctx.subjectId),
+            ),
+          );
         if (sourceIds.length) {
           await tx.delete(c.sourceLinks).where(inArray(c.sourceLinks.sourceItemId, sourceIds));
           await tx
@@ -361,14 +370,6 @@ export class ProfilePurgeService {
             and(
               eq(p.importBatches.tenantId, ctx.tenantId),
               eq(p.importBatches.subjectId, ctx.subjectId),
-            ),
-          );
-        await tx
-          .delete(d.sourceBlobs)
-          .where(
-            and(
-              eq(d.sourceBlobs.tenantId, ctx.tenantId),
-              eq(d.sourceBlobs.subjectId, ctx.subjectId),
             ),
           );
         const [framework] = await tx

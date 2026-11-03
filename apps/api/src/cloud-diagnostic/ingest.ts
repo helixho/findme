@@ -183,7 +183,8 @@ export class CoreIngestService {
       };
       await tx
         .update(p.importBatches)
-        .set({ status: "committed", result, committedAt: new Date() })
+        // The imported items now live in source_items; the staged copy is not kept.
+        .set({ status: "committed", result, payload: {}, committedAt: new Date() })
         .where(eq(p.importBatches.id, id));
       return result;
     });
