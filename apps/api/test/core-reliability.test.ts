@@ -1,11 +1,11 @@
 import { coreSchema, createDb } from "@findme/db";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { createApp } from "../src/app.js";
 import { inputFingerprint } from "../src/core/epistemic-policy.js";
 import {
   evaluateDecisionLineage,
   evaluateLatencySegments,
 } from "../src/core/exploration-quality.js";
+import { coreTestApp } from "./helper.js";
 
 const testUrl = process.env.DATABASE_URL_TEST;
 const dbDescribe = testUrl ? describe : describe.skip;
@@ -161,7 +161,7 @@ function fakeGateway(options?: { onExtract?: () => void }) {
     chat: async () => ({ text: "" }),
     describe: (route: string) => ({ route, model: "test-observation-model" }),
   };
-  return gateway as unknown as NonNullable<Parameters<typeof createApp>[0]["gateway"]>;
+  return gateway as unknown as NonNullable<Parameters<typeof coreTestApp>[0]["gateway"]>;
 }
 
 function scriptedGateway(
@@ -171,12 +171,12 @@ function scriptedGateway(
     extract,
     chat: async () => ({ text: "" }),
     describe: (route: string) => ({ route, model: "test-observation-model" }),
-  } as unknown as NonNullable<Parameters<typeof createApp>[0]["gateway"]>;
+  } as unknown as NonNullable<Parameters<typeof coreTestApp>[0]["gateway"]>;
 }
 
 dbDescribe("Core reliability", () => {
   const { db, sql } = createDb(testUrl ?? "");
-  const app = createApp({
+  const app = coreTestApp({
     db,
     gateway: fakeGateway(),
     auth: { mode: "static", accessToken: "secret" },
@@ -187,7 +187,7 @@ dbDescribe("Core reliability", () => {
   };
 
   beforeEach(async () => {
-    await sql.unsafe("TRUNCATE TABLE tenants, access_bootstrap_tokens RESTART IDENTITY CASCADE");
+    await sql.unsafe("TRUNCATE TABLE tenants RESTART IDENTITY CASCADE");
   });
 
   afterAll(async () => {
@@ -282,7 +282,7 @@ dbDescribe("Core reliability", () => {
   });
 
   it("Start 不依赖模型即可先保存，Planner 缺模型时明确失败", async () => {
-    const noModelApp = createApp({
+    const noModelApp = coreTestApp({
       db,
       auth: { mode: "static", accessToken: "secret" },
     });
@@ -627,7 +627,7 @@ dbDescribe("Core reliability", () => {
 
   it("Start/Respond 只报告 save_ms 且不调用模型，Continue 分开报告 planner/synthesis", async () => {
     let extractCalls = 0;
-    const timingApp = createApp({
+    const timingApp = coreTestApp({
       db,
       gateway: fakeGateway({ onExtract: () => extractCalls++ }),
       auth: { mode: "static", accessToken: "secret" },
@@ -716,7 +716,7 @@ dbDescribe("Core reliability", () => {
     let revisionCalls = 0;
     let allowRevision = false;
     const retryTexts: string[] = [];
-    const retryApp = createApp({
+    const retryApp = coreTestApp({
       db,
       gateway: scriptedGateway(async (input) => {
         const system = input.system ?? "";
@@ -1058,7 +1058,7 @@ dbDescribe("Core reliability", () => {
   it("Planner 重试的血缘指纹对应实际带纠错约束的输入", async () => {
     const inputs: string[] = [];
     const baseline = fakeGateway();
-    const retryApp = createApp({
+    const retryApp = coreTestApp({
       db,
       auth: { mode: "static", accessToken: "secret" },
       gateway: scriptedGateway(async (input) => {

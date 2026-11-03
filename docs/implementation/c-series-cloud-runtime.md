@@ -58,7 +58,7 @@ Node 与既有 Cloudflare Worker 都有显式 account 组合；Cloudflare 的独
 
 ## 6. 路由、鉴权与失败定位图
 
-本节以 `apps/api/src/app.ts` 的组合为准，不平行抄写数据库 schema；物理表与迁移见 `packages/db/src/schema-*.ts` 和 [迁移方案](../delivery/phase-1-migration.md)。
+本节以 `apps/api/src/app.ts` 的组合为准，不平行抄写数据库 schema；物理表与迁移见 `packages/db/src/schema-*.ts` 和 迁移方案。
 
 | API 族 | 挂载与作用域 | 写入/幂等与失败定位 |
 | --- | --- | --- |

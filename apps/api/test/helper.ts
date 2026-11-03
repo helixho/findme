@@ -1,17 +1,20 @@
-import { createApp } from "../src/app.js";
+import type { Db } from "@findme/db";
+import { Hono } from "hono";
+import type { CoreGateway } from "../src/core/llm.js";
+import { onError } from "../src/middleware/error.js";
+import { coreRoutes } from "../src/routes/core.js";
 
-type AppOpts = Parameters<typeof createApp>[0];
-
-// 测试辅助:包装 createApp,自动注入 Authorization,使启用 bearer 鉴权后业务测试仍走正常路径。
-// 鉴权本身(无/错 token → 401、/health 开放)由 app.test.ts 专门覆盖。
-export function authedApp(opts: AppOpts) {
-  const app = createApp(opts);
-  const auth = { Authorization: `Bearer ${opts.accessToken}` };
-  return {
-    request: (input: string, init: RequestInit = {}) =>
-      app.request(input, {
-        ...init,
-        headers: { ...auth, ...(init.headers as Record<string, string> | undefined) },
-      }),
-  };
+// Test harness: Core routes for one fixed owner, without account sessions or Profile scoping.
+// Account routing, sessions and scoping are covered by the account integration suites.
+export function coreTestApp(opts: { db: Db; gateway?: CoreGateway; auth?: unknown }) {
+  const app = new Hono();
+  app.onError(onError);
+  app.route(
+    "/api/core",
+    coreRoutes(opts.db, opts.gateway, async () => ({
+      provider: "findme-runtime",
+      principalId: "owner",
+    })),
+  );
+  return app;
 }

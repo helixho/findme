@@ -79,26 +79,6 @@ export async function archiveEnvironment() {
     }
     return { batchHash, artifactHash, payloads };
   }
-  // Independent databases: never remove/replace the runner's schema or another suite's data.
-  async function migrationDatabase(work: (db: Client, url: string) => Promise<void>) {
-    const name = `archive_migration_${randomUUID().replaceAll("-", "")}`;
-    const url = new URL(adminUrl!);
-    url.pathname = `/${name}`;
-    await admin.query(`CREATE DATABASE "${name}"`);
-    const db = new Client({ connectionString: url.toString() });
-    try {
-      await db.connect();
-      const journal = JSON.parse(await archiveFile("packages/db/migrations/meta/_journal.json"));
-      for (const entry of journal.entries.filter((e: { idx: number }) => e.idx < 12)) {
-        const ddl = await archiveFile(`packages/db/migrations/${entry.tag}.sql`);
-        await db.query(ddl);
-      }
-      await work(db, url.toString());
-    } finally {
-      await db.end();
-      await admin.query(`DROP DATABASE "${name}"`);
-    }
-  }
   return {
     admin,
     runtime,
@@ -106,7 +86,6 @@ export async function archiveEnvironment() {
     auth,
     profile,
     seed,
-    migrationDatabase,
     close: async () => {
       await Promise.all([admin.end(), runtime.sql.end(), identity.sql.end(), auth.end()]);
     },

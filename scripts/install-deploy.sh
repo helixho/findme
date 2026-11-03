@@ -85,18 +85,25 @@ if [[ ! -f $ENV_FILE ]]; then
     printf 'POSTGRES_PASSWORD=%s\n' "$(random_hex)"
     for role in RUNTIME IDENTITY AUTH; do printf 'DB_%s_PASSWORD=%s\n' "$role" "$(random_hex)"; done
     printf 'ACCOUNT_SECRET=%s\nOWNER_EMAIL=owner@findme.local\nOWNER_PASSWORD=%s\n' "$(random_hex)" "$(random_hex)"
-    printf 'CLOUD_INFERENCE_ENABLED=0\nCLOUD_PROFILE_CALL_LIMIT=0\nDEEPSEEK_MODEL=deepseek-v4-flash\nDEEPSEEK_API_KEY=\n'
+    printf '# External database (optional): set both, e.g. DATABASE_LOCATION=host/db?sslmode=require\n'
+    printf '# and DATABASE_ADMIN_URL=postgresql://owner:password@host/db?sslmode=require\n'
   } > "$ENV_FILE"
 fi
+ADMIN_URL=$(get_value DATABASE_ADMIN_URL)
 "${SUDO[@]}" mkdir -p "$STATE/files"
 "${SUDO[@]}" chown 1000:1000 "$STATE/files"
 COMPOSE=("${DOCKER[@]}" compose --env-file "$ENV_FILE" -f "$REPO/deployment/standalone/compose.yaml")
+if [[ -z $ADMIN_URL ]]; then
+  # Local database: started by the local-db profile; external databases are never started here.
+  COMPOSE+=(--profile local-db)
+  ADMIN_URL="postgresql://postgres:$(get_value POSTGRES_PASSWORD)@postgres/findme"
+fi
 echo '[deploy] Building the complete application from this checkout'
 "${COMPOSE[@]}" build app
-"${COMPOSE[@]}" up -d --wait postgres
-echo '[deploy] Applying schema and initializing the account (existing data preserved)'
+if [[ $ADMIN_URL == *@postgres/findme ]]; then "${COMPOSE[@]}" up -d --wait postgres; fi
+echo '[deploy] Creating the database structure if empty and initializing the account (existing data preserved)'
 "${COMPOSE[@]}" run --rm --no-deps \
-  -e "DATABASE_URL_MIGRATION=postgresql://postgres:$(get_value POSTGRES_PASSWORD)@postgres/findme" \
+  -e "DATABASE_URL_ADMIN=$ADMIN_URL" \
   -e "DB_RUNTIME_PASSWORD=$(get_value DB_RUNTIME_PASSWORD)" \
   -e "DB_IDENTITY_PASSWORD=$(get_value DB_IDENTITY_PASSWORD)" \
   -e "DB_AUTH_PASSWORD=$(get_value DB_AUTH_PASSWORD)" \
@@ -105,4 +112,4 @@ echo '[deploy] Applying schema and initializing the account (existing data prese
 "${COMPOSE[@]}" exec -T app node -e 'for (const p of ["/", "/health?strict=1", "/ready"]) { const r=await fetch("http://127.0.0.1:8000"+p); if(!r.ok) throw Error(p+":"+r.status); } console.log("[deploy] Web, database, account role and worker ready")'
 printf '%s\n' "$COMMIT" > "$STATE/deployed-commit"
 printf '\nFindMe ready: %s\nAccount: owner@findme.local\nCredentials and runtime settings: %s\n' "$PUBLIC_URL" "$ENV_FILE"
-echo 'Read OWNER_PASSWORD from that file on the instance. Model inference is off until configured.'
+echo 'Read OWNER_PASSWORD from that file on the instance. Configure the model provider in the App settings.'

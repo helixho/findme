@@ -61,22 +61,6 @@ export type Evidence = {
   content_author: string;
   source_id: string;
 };
-export type OwnerImportPreview = {
-  id: string;
-  input_hash: string;
-  status: "preview" | "confirmed" | "committed";
-  source_archive_hash: string;
-  source_fingerprint: string;
-  reports: {
-    domain: string;
-    version: string;
-    report_hash: string;
-    audit_hash: string;
-    evidence_count: number;
-  }[];
-  overall_excluded: true;
-  requires_confirmation: true;
-};
 export const labels: Record<string, string> = {
   awaiting_input: "等待输入",
   pending: "等待处理",

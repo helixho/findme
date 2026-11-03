@@ -19,6 +19,7 @@ import { CloudReadingHome } from "./cloud/CloudReadingHome";
 import { ConversationView } from "./cloud/ConversationView";
 import { DataPanel } from "./cloud/DataPanel";
 import { type ReportPane, RunDetail } from "./cloud/RunDetail";
+import { SettingsPanel } from "./cloud/SettingsPanel";
 import { type Profile, type Run, type Session, message } from "./cloud/shared";
 import "./cloud-workspace.css";
 
@@ -39,6 +40,7 @@ export default function CloudWorkspace() {
     | "support"
     | "perspective"
     | "data"
+    | "settings"
     | "frameworks"
   >("home");
   const [selectedRun, setSelectedRun] = useState<string | null>(null);
@@ -242,6 +244,7 @@ export default function CloudWorkspace() {
         {view === "support" && profile && <SpecialistView key={profile} />}
         {view === "perspective" && profile && <PerspectiveView key={profile} />}
         {view === "data" && profile && <DataPanel key={profile} />}
+        {view === "settings" && <SettingsPanel />}
         {(["home", "topics", "history"] as string[]).includes(view) &&
           (selectedRun ? (
             <RunDetail
@@ -323,6 +326,7 @@ export default function CloudWorkspace() {
                 ["support", "具体困难与尝试"],
                 ["perspective", "作品视角"],
                 ["data", "我的资料"],
+                ["settings", "模型设置"],
               ] as const
             ).map(([key, title]) => (
               <button

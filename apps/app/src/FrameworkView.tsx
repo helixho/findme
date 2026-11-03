@@ -5,7 +5,6 @@ import type {
   FrameworkRunView,
 } from "@findme/core";
 import { useEffect, useMemo, useState } from "react";
-import { getAccessToken, privateUnderstandingMode } from "./api";
 import {
   FrameworkApiError,
   type FrameworkAuthFetch,
@@ -121,9 +120,9 @@ function Domain({
 export function FrameworkView({
   authFetch,
   draftScope,
-}: { authFetch: FrameworkAuthFetch; draftScope?: string }) {
+}: { authFetch: FrameworkAuthFetch; draftScope: string }) {
   const api = useMemo(() => createFrameworkApi(authFetch), [authFetch]);
-  const [scope, setScope] = useState(draftScope ?? "");
+  const scope = draftScope;
   const [catalog, setCatalog] = useState<FrameworkCatalog | null>(null);
   const [run, setRun] = useState<FrameworkRunView | null>(null);
   const [text, setText] = useState("");
@@ -133,26 +132,7 @@ export function FrameworkView({
   const [exact, setExact] = useState<FrameworkEvidence | null>(null);
   const [edit, setEdit] = useState<{ id: string; text: string; reason: string } | null>(null);
   const [abandonConfirm, setAbandonConfirm] = useState(false);
-  // Tab-local drafts and mutation identities survive normal page navigation. The
-  // private path uses a token digest, never a shared "static" owner bucket.
-  useEffect(() => {
-    if (draftScope) {
-      setScope(draftScope);
-      return;
-    }
-    let live = true;
-    const token = getAccessToken();
-    if (!token) return;
-    void crypto.subtle.digest("SHA-256", new TextEncoder().encode(token)).then((bytes) => {
-      if (live)
-        setScope(
-          `${privateUnderstandingMode ? "private" : "legacy"}:${Array.from(new Uint8Array(bytes), (n) => n.toString(16).padStart(2, "0")).join("")}`,
-        );
-    });
-    return () => {
-      live = false;
-    };
-  }, [draftScope]);
+  // Tab-local drafts and mutation identities survive normal page navigation.
   const storageKey = (kind: string, identity: string) =>
     `findme_framework:${JSON.stringify([scope, kind, identity])}`;
   const draftKey = (r: FrameworkRunView | null) =>

@@ -4,7 +4,12 @@ import { StringDecoder } from "node:string_decoder";
 import { coreSchema as core, createDb } from "@findme/db";
 import { and, eq } from "drizzle-orm";
 import { ProfileService } from "../src/auth/profiles.js";
-import { createAccountAuth, createOwnerLogin, deleteOwnerLogin } from "../src/auth/server.js";
+import {
+  ACCOUNT_ISSUER,
+  createAccountAuth,
+  createOwnerLogin,
+  deleteOwnerLogin,
+} from "../src/auth/server.js";
 
 const confirmation = "CREATE OWNER ACCOUNT";
 const sourceProvider = "findme-runtime";
@@ -112,7 +117,7 @@ async function main() {
     const scope = await findOwnerScope(identity.db);
     const user = await createOwnerLogin(account.auth, { email, name, password });
     const principal = {
-      provider: `findme-account:${new URL(baseUrl).origin}`,
+      provider: ACCOUNT_ISSUER,
       principalId: user.id,
     };
     const sourcePrincipal = { provider: sourceProvider, principalId: sourcePrincipalId };

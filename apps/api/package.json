@@ -10,7 +10,6 @@
     "test:local": "node ../../scripts/test.mjs local",
     "test:db": "node ../../scripts/test.mjs db",
     "quality:exploration": "tsx scripts/exploration-quality-eval.ts",
-    "av:dogfood": "node --env-file-if-exists=../../.env --import tsx scripts/av-dogfood.ts",
     "av:layers": "node --env-file-if-exists=../../.env --import tsx scripts/av-layers.ts",
     "av:layers:view": "node --import tsx scripts/av-layers-view.ts",
     "diagnostic:reason": "node --import tsx scripts/diagnostic-reasoning.ts",

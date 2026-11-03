@@ -1,4 +1,3 @@
-export const cloudMode = import.meta.env.VITE_APP_AUTH_MODE === "account";
 const base = (import.meta.env.VITE_CORE_API_BASE ?? "").replace(/\/$/, "");
 let profile = "";
 let epoch = 0;

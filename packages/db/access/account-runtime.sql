@@ -1,8 +1,5 @@
--- Opt-in account runtime access policy. Apply only after 0010 in an approved isolated environment.
-
--- This file is deliberately NOT in the automatic migration journal: enabling RLS on legacy Core
-
--- changes runtime access. Deploy the account runtime with separate login roles before applying.
+-- Account runtime roles, grants and row-level policies. Applied after schema.sql on every deploy;
+-- every statement is idempotent.
 
 BEGIN;
 
@@ -16,6 +13,7 @@ DO $$ BEGIN
 END $$;
 
 GRANT USAGE ON SCHEMA public TO findme_runtime;
+GRANT SELECT,INSERT,UPDATE ON app_settings TO findme_runtime;
 DO $$ BEGIN
  IF to_regclass('public.specialist_sessions') IS NOT NULL
   AND to_regclass('public.specialist_proposals') IS NOT NULL

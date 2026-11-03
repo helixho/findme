@@ -4,7 +4,7 @@ import { coreSchema, createDb, diagnosticSchema as d, platformSchema as p } from
 import { and, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createApp } from "../src/app.js";
-import { createAccountAuth } from "../src/auth/server.js";
+import { ACCOUNT_ISSUER, createAccountAuth } from "../src/auth/server.js";
 import { CloudProcessingService } from "../src/cloud-diagnostic/processing.js";
 import { createCloudServices } from "../src/cloud-diagnostic/runtime.js";
 import { withProfileTransaction } from "../src/cloud-diagnostic/scope.js";
@@ -235,11 +235,11 @@ suite("account cloud integration / isolated Postgres / no model", () => {
   }, 150000);
   it("enforces database RLS even when a scoped query omits an explicit source filter", async () => {
     const ctxA = await services.profiles.resolve(
-      { provider: `findme-account:${base}`, principalId: aUser },
+      { provider: ACCOUNT_ISSUER, principalId: aUser },
       aProfile,
     );
     const ctxB = await services.profiles.resolve(
-      { provider: `findme-account:${base}`, principalId: bUser },
+      { provider: ACCOUNT_ISSUER, principalId: bUser },
       bProfile,
     );
     const own = await withProfileTransaction(runtime.db, ctxA, (tx) =>
@@ -285,7 +285,7 @@ suite("account cloud integration / isolated Postgres / no model", () => {
   });
   async function syntheticOverall() {
     const ctx = await services.profiles.resolve(
-      { provider: `findme-account:${base}`, principalId: aUser },
+      { provider: ACCOUNT_ISSUER, principalId: aUser },
       aProfile,
     );
     const topic = await services.repository.create(
@@ -429,7 +429,7 @@ suite("account cloud integration / isolated Postgres / no model", () => {
   );
   it("commits initial consume staleness in Postgres, preserves budget and requires a new explicitly enqueued job", async () => {
     const ctx = await services.profiles.resolve(
-      { provider: `findme-account:${base}`, principalId: aUser },
+      { provider: ACCOUNT_ISSUER, principalId: aUser },
       aProfile,
     );
     const run = await services.repository.create(
@@ -713,7 +713,7 @@ suite("account cloud integration / isolated Postgres / no model", () => {
       });
     });
     const otherCtx = await services.profiles.resolve(
-      { provider: `findme-account:${base}`, principalId: bUser },
+      { provider: ACCOUNT_ISSUER, principalId: bUser },
       bProfile,
     );
     const other = await services.repository.create(
@@ -916,52 +916,34 @@ suite("account cloud integration / isolated Postgres / no model", () => {
   cloudCheckpointRegressions({
     db: () => runtime.db,
     context: () =>
-      services.profiles.resolve(
-        { provider: `findme-account:${base}`, principalId: aUser },
-        aProfile,
-      ),
+      services.profiles.resolve({ provider: ACCOUNT_ISSUER, principalId: aUser }, aProfile),
     repository: () => services.repository,
   });
   cloudCoreSourceInvalidation({
     db: () => runtime.db,
     context: () =>
-      services.profiles.resolve(
-        { provider: `findme-account:${base}`, principalId: aUser },
-        aProfile,
-      ),
+      services.profiles.resolve({ provider: ACCOUNT_ISSUER, principalId: aUser }, aProfile),
     otherContext: () =>
-      services.profiles.resolve(
-        { provider: `findme-account:${base}`, principalId: bUser },
-        bProfile,
-      ),
+      services.profiles.resolve({ provider: ACCOUNT_ISSUER, principalId: bUser }, bProfile),
     corePost: (path, body, key) =>
       request(a, path, { method: "POST", body, profile: aProfile, key }),
   });
   cloudLifecycleContinuity({
     db: () => runtime.db,
     context: () =>
-      services.profiles.resolve(
-        { provider: `findme-account:${base}`, principalId: aUser },
-        aProfile,
-      ),
+      services.profiles.resolve({ provider: ACCOUNT_ISSUER, principalId: aUser }, aProfile),
     repository: () => services.repository,
   });
   cloudProcessingContinuity({
     db: () => runtime.db,
     context: () =>
-      services.profiles.resolve(
-        { provider: `findme-account:${base}`, principalId: aUser },
-        aProfile,
-      ),
+      services.profiles.resolve({ provider: ACCOUNT_ISSUER, principalId: aUser }, aProfile),
     repository: () => services.repository,
   });
   cloudRestoreContinuity({
     db: () => runtime.db,
     context: () =>
-      services.profiles.resolve(
-        { provider: `findme-account:${base}`, principalId: aUser },
-        aProfile,
-      ),
+      services.profiles.resolve({ provider: ACCOUNT_ISSUER, principalId: aUser }, aProfile),
     repository: () => services.repository,
   });
   it("exports only the selected Profile and revokes the signed-out session", async () => {

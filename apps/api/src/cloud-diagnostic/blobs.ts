@@ -1,4 +1,3 @@
-import type { R2Bucket } from "@cloudflare/workers-types";
 import { CloudBlobDeclaration } from "@findme/core";
 import { type Db, diagnosticSchema as t } from "@findme/db";
 import { and, eq } from "drizzle-orm";
@@ -18,33 +17,6 @@ export interface BlobStore {
   ): Promise<{ body: ReadableStream<Uint8Array>; size: number; sha256: string | null } | null>;
   head(key: string): Promise<{ size: number; sha256: string | null } | null>;
   delete(key: string): Promise<void>;
-}
-const hex = (b: ArrayBuffer | undefined) =>
-  b ? Array.from(new Uint8Array(b), (v) => v.toString(16).padStart(2, "0")).join("") : null;
-export function r2BlobStore(bucket: R2Bucket): BlobStore {
-  return {
-    async put(key, body, sha256, mediaType) {
-      await bucket.put(key, body as never, {
-        sha256,
-        httpMetadata: { contentType: mediaType, cacheControl: "no-store" },
-      });
-    },
-    async head(key) {
-      const o = await bucket.head(key);
-      return o ? { size: o.size, sha256: hex(o.checksums.sha256) } : null;
-    },
-    async get(key) {
-      const o = await bucket.get(key);
-      return o
-        ? {
-            body: o.body as unknown as ReadableStream<Uint8Array>,
-            size: o.size,
-            sha256: hex(o.checksums.sha256),
-          }
-        : null;
-    },
-    delete: (key) => bucket.delete(key),
-  };
 }
 const blobs = t.sourceBlobs;
 const where = (ctx: PersonalContext, id: string) =>

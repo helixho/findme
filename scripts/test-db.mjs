@@ -81,16 +81,8 @@ export async function isolatedDatabase({
     const url = (user, pass = password) => `postgresql://${user}:${pass}@${address}/findme_test`;
     const admin = url("postgres");
     await connectionPreflight(Client, admin, signal);
-    log(
-      "[db setup] PostgreSQL 17 ready; applying existing migration chain, then account-runtime.sql.",
-    );
-    await run("pnpm", ["db:migrate"], {
-      cwd: root,
-      // drizzle-kit imports dotenv/config itself. Redirect that lookup to the empty device.
-      env: { ...env, DATABASE_URL_MIGRATION: admin, DOTENV_CONFIG_PATH: "/dev/null" },
-      signal,
-      timeout: 60_000,
-    });
+    log("[db setup] PostgreSQL 17 ready; applying schema.sql, then account-runtime.sql.");
+    await query(Client, admin, await readFile(path.join(root, "packages/db/schema.sql"), "utf8"));
     await query(
       Client,
       admin,

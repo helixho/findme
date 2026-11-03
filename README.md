@@ -47,7 +47,7 @@ A single-node deployment (web app, API, background worker and PostgreSQL in Dock
 Use the product and architecture documents for intended behavior, As-Is for implemented behavior and the Roadmap for what remains. This README is an orientation page; it does not claim that planned capabilities are complete.
 
 
-See the [debt ledger](docs/delivery/debt-resolution.md), [migration and compatibility plan](docs/delivery/phase-1-migration.md), and [first-stage acceptance record](docs/delivery/acceptance.md). Choose configuration by [runtime mode](docs/implementation/development-environment.md#按模式准备最小配置); legacy seed assets are not a prerequisite for an account with no imported history.
+See the [debt ledger](docs/delivery/debt-resolution.md) and [first-stage acceptance record](docs/delivery/acceptance.md). Local development configuration is in [Development environment](docs/implementation/development-environment.md#本机开发配置); legacy seed assets are not a prerequisite for an account with no imported history.
 
 ## License
 

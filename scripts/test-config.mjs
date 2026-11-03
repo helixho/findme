@@ -1,21 +1,9 @@
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 
-export const dbFiles = [
-  "app",
-  "claim",
-  "cloud-account-integration",
-  "core-reliability",
-  "delete-guard",
-  "export",
-  "insights",
-  "materials",
-  "process",
-  "questionnaires",
-  "queue",
-  "records",
-  "review",
-].map((name) => `test/${name}.test.ts`);
+export const dbFiles = ["cloud-account-integration", "core-reliability"].map(
+  (name) => `test/${name}.test.ts`,
+);
 
 // Explicit postfix identifies new standalone real-PostgreSQL suites.
 export const isDatabaseTest = (file) =>
@@ -25,15 +13,12 @@ export const isDatabaseTest = (file) =>
 export const fastNames = new Set([
   "account-session-context",
   "cloud-processing-local",
-  "cloudflare-scheduled",
-  "crisis",
   "env",
   "export-restore-continuity",
   "gateway-error-classification",
   "llm-router",
   "ordered-source-index",
   "core-report-temporal",
-  "seed-integrity",
   "specialist-session-update",
   "u2-budget-compatibility",
   "u2-semantic-regressions",

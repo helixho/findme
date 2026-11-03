@@ -1,13 +1,18 @@
 import path from "node:path";
-import { BatchStore } from "../dogfood/store.js";
-import { digest } from "../shared/primitives.js";
-import { atomic, noLinks, optionalJson, privateDirectory } from "../understanding-baseline/io.js";
+import { BatchStore } from "../../src/dogfood/store.js";
+import { digest } from "../../src/shared/primitives.js";
+import {
+  atomic,
+  noLinks,
+  optionalJson,
+  privateDirectory,
+} from "../../src/understanding-baseline/io.js";
 
 import {
   type FrameworkRepository,
   type FrameworkState,
   FrameworkStateSchema as State,
-} from "./schema.js";
+} from "../../src/framework-runtime/schema.js";
 
 const updateQueues = new Map<string, Promise<void>>();
 export class PrivateFrameworkRepository implements FrameworkRepository {

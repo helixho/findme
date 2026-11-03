@@ -76,40 +76,9 @@ pnpm db:migrate
 
 `db:generate` 会改 schema 制品；`db:migrate` 使用实际配置的 DATABASE_URL_MIGRATION 或兼容连接选择，执行 SQL。只有测试运行器内部调用时，其目标才由运行器保证是本次临时库；单独执行时必须先核对目标。
 
-## 4. 学习素材 bridge（不是个人会话导入）
+## 4. 部署
 
-下列命令使用操作者指定的 `FINDME_CORPUS_DIR`；这只是 CLI 路径占位，不是核心产品依赖。实际 corpus 位置读取本机忽略配置，不在多份正文维护路径副本。
-
-```bash
-node scripts/import-corpus-seeds.mjs --corpus "$FINDME_CORPUS_DIR"
-node scripts/import-corpus-seeds.mjs --corpus "$FINDME_CORPUS_DIR" --require-ready
-node scripts/import-corpus-seeds.mjs --corpus "$FINDME_CORPUS_DIR" --require-ready --min-materials 12 --min-questionnaires 12 --min-linked-materials 4 --min-theory-questionnaires 6 --require-material-types concept,figure,book --require-link-integrity
-node scripts/import-corpus-seeds.mjs --corpus "$FINDME_CORPUS_DIR" --apply
-```
-
-不带 `--apply` 的命令按现有脚本检查 exports；`--apply` 合并 content_ready 到 seed JSON，会修改文件。数值参数是既有素材 bridge 验收样例，不是新的个人认识充分性标准。它不导入 AgentsView/TencentDB 的个人历史，不以本脚本实现 DA 的目标 adapter 契约。
-
-## 5. 部署与资源创建
-
-```bash
-# 后端 API / health / internal 队列（不托管客户端静态资源）
-pnpm cf:deploy
-
-# 新目标 App（先 build，再发布 findme-app）
-pnpm app:deploy
-
-# 仅首次或明确需要新建资源时
-pnpm exec wrangler queues create findme-tasks
-pnpm exec wrangler queues create findme-tasks-dlq
-
-# 已退役，仅作拒绝入口
-bash scripts/deploy.sh
-```
-
-`pnpm cf:deploy` 发布 `wrangler.jsonc` 中的 Worker `findme`；`pnpm app:deploy` 使用 `wrangler.app.jsonc` 发布目标客户端 `findme-app` 到 `app.findme.example.com`。部署、migration 与资源创建均有外部副作用，需在明确实现/发布任务中执行。访问 secret 的名称及运行态只查当前配置和平台，不在文档中携带其值。
-
-Worker 定时补发独立由 `FINDME_SCHEDULED_ENABLED` 控制，只有精确字符串 `"1"` 开启；未配置、`"0"` 或其他值均在创建数据库连接前结束。仓库 cron 列表为空；重新启用需要明确开启开关并配置所需 cron，仍保留账号模式不运行旧 dispatch 的限制。此开关不控制 HTTP 或 Queue consumer，不能用它停用队列：直接成功返回会有确认消息的风险。数据库停用期间已有队列消息仍按原有失败/重试/DLQ 策略处理；需要暂停消费时另行设计和授权，不自动恢复数据库。
-
+单节点部署、换节点与故障定位只在 [单节点部署](../deployment/standalone/README.md) 维护。部署会构建镜像并启停实例上的服务，属于有副作用的操作。
 
 ## AV 本人小批内测
 
@@ -254,15 +223,15 @@ U4 复用 `apps/api/scripts/understanding-app.ts` 的同一个私有 host，不�
 
 ## C2–C4 账号云端模式（显式启用）
 
-Node选择 `APP_AUTH_MODE=account`，Cloudflare选择 `FINDME_ACCOUNT_MODE=1`；客户端在后续构建时选择 `VITE_APP_AUTH_MODE=account`。这些变量没有写入现用环境。服务端账号由 `createAccountAuth` 配置BetterAuth/pg，使用独立runtime、identity、auth数据库凭据与受信任Origin；部署说明和示例变量见 `deployment/`。
+账号模式是唯一运行方式。服务端账号由 `createAccountAuth` 配置 BetterAuth/pg，使用独立 runtime、identity、auth 数据库凭据与受信任 Origin；部署见 [单节点部署](../deployment/standalone/README.md)。
 
-`pnpm --filter @findme/api owner-account:create` 是交互式真实建号命令，会读取认证与身份数据库连接、要求终端输入邮箱和密码，并把新登录绑定到既有 `findme-runtime/owner` 本人作用域；缺少该作用域时拒绝，不创建新租户。它不是只读检查，不随构建或预览运行，实际执行需另行决定目标数据库与范围。
+`pnpm --filter @findme/api owner-account:create` 是交互式真实建号命令，会读取认证与身份数据库连接、要求终端输入邮箱和密码，并把新登录绑定到既有 `findme-runtime/owner` 本人作用域（登录签发者固定为 `findme-account`，与网址无关）；缺少该作用域时拒绝，不创建新租户。它不是只读检查，不随构建或预览运行，实际执行需另行决定目标数据库与范围。
 
-`/api/profiles` 提供账号拥有的Profile创建、列表、改名、归档/恢复。业务读取携带 `X-FindMe-Profile`，服务端核对membership。旧records/insights等无scope接口在account模式不挂载。
+`/api/profiles` 提供账号拥有的Profile创建、列表、改名、归档/恢复。业务读取携带 `X-FindMe-Profile`，服务端核对membership。`/api/settings/model` 读写实例的模型设置（密钥只写不读）。
 
 `/api/diagnostics` 创建/读取专题；`/:id/responses` 幂等保存原话，不触发模型；`/:id/process/plan` 只检查实际选材与请求阶段；`/:id/process` 在明确 `provider_call_cap` 下落库排队；`/jobs/:id/resume` 需显式新任务总cap，累计已用次数保留；cancel只停止后续与发布，不能承诺取消已经发出的计费请求。公开API不接受客户端提交“已审核报告”。history与evidence按当前scope和来源版本读取。
 
-正式任务由同Worker的队列consumer领取；scheduled handler在account模式不启动推理。Node如需队列，必须配置私有HTTPSdispatcher和token。服务端 `CLOUD_INFERENCE_ENABLED` 默认关闭，Profile预算默认0；Framework独立预算默认0，continue另有调用确认。对话处理（`/api/core/explorations/:id/continue`、`/correct`）另由 `CORE_MODEL_DAILY_OPERATION_LIMIT` 控制：每个 Profile 滚动 24 小时的自动处理次数，默认0即关闭，需同时打开推理总开关；`GET /api/core/model-status` 只读返回用量，依据见 ADR D26。不存在绕过M-X2或切换个人Codex的云端fallback。
+任务由应用进程内的执行器从任务表领取。模型调用开关默认关闭，Profile预算默认0；Framework独立预算默认0，continue另有调用确认，均在 App 的模型设置中修改。对话处理（`/api/core/explorations/:id/continue`、`/correct`）另由“对话自动处理次数”控制：每个 Profile 滚动 24 小时的自动处理次数，默认0即关闭，需同时打开推理总开关；`GET /api/core/model-status` 只读返回用量，依据见 ADR D26。不存在绕过M-X2或切换个人Codex的云端fallback。
 
 `/api/blobs` 管理原档声明和鉴权内容传输；上传/删除/恢复属于真实对象副作用，仅在明确用户操作后执行。`/api/data/imports/prepare`、`restore-prepare` 只生成导入分片；preview保存预览，commit必须携带对应input_hash与confirm=true。导入不等于资格审核或发布旧L3。
 
@@ -270,20 +239,16 @@ Node选择 `APP_AUTH_MODE=account`，Cloudflare选择 `FINDME_ACCOUNT_MODE=1`；
 
 离线文件转换代码：`apps/api/scripts/prepare-core-ingest.ts --input ABS --out NEW_ABS_DIR --namespace NAME [--restore-export]`。只有显式执行才读取指定文件、写私人转换结果，不联网、不导入、不调用模型。输出拒绝仓库内部目录，文件采用私有权限。
 
-AV 加工归档准备器：在 `apps/api` 下执行 `node --import tsx scripts/prepare-av-processed-archive.ts --batch ABS --u1 ABS --u2 ABS --tenant-id UUID --subject-id UUID --namespace NAME --out NEW_ABS_DIR`。只读加工白名单，排除原始会话与整个 jobs 树；输出 gzip 去重包、事务 SQL 分片和传输清单到仓库/来源之外的新私人目录。不读取 `.env`、联网、建表、导入或调用模型。`apps/api/scripts/av-processed-archive-schema.sql` 是历史两表补充 DDL；新库及精确旧表接管已由 journal 0012 纳管，不再作为正常新装的额外步骤；实际操作与验收见 归档执行记录。
+AV 加工归档准备器：在 `apps/api` 下执行 `node --import tsx scripts/prepare-av-processed-archive.ts --batch ABS --u1 ABS --u2 ABS --tenant-id UUID --subject-id UUID --namespace NAME --out NEW_ABS_DIR`。只读加工白名单，排除原始会话与整个 jobs 树；输出 gzip 去重包、事务 SQL 分片和传输清单到仓库/来源之外的新私人目录。不读取 `.env`、联网、建表、导入或调用模型。归档两表已包含在 `packages/db/schema.sql` 中。
 
 必要 App 快照准备器：在 `apps/api` 下执行 `node --import tsx scripts/prepare-understanding-runtime.ts --repo-root ABS --batch ABS --coverage ABS --baseline-dir ABS --state-dir ABS --source-archive ARCHIVE_JSON --tenant-id UUID --subject-id UUID --out NEW_ABS_DIR`。只在既有读取资格/版本/证据检查之后生成私人便携快照和导入分片；源归档必须完整且归属一致，若发现真实反馈则拒绝隐式遗漏。它不联网、不读取 `.env`、不写数据库或调用模型。快照包含私人报告与精确片段，不进入前端公共 assets 或 Git。
-
-Worker 归档读取由 `wrangler.jsonc` 中的非秘密哈希变量显式启用，仅支持既有 static 鉴权和同一本人归属；绑定接口不启用反馈/加工。`./node_modules/.bin/wrangler deploy --dry-run --config wrangler.jsonc --outdir ABS` 仅构建，正式 deploy 才发布。实际发布、验证和清理边界见 云端读取与项目清理记录。
-
-账号模式迁移链包含 0009、0010；知识与专项路径新增 `0011_specialist.sql` 及 schema 快照。`drizzle-kit generate` 只生成本地 schema 制品；`drizzle-kit check` 核对迁移快照和日志一致性，不连接数据库，也不证明手写 SQL 已成功应用；`db:migrate` 会连接数据库并执行 SQL。完整 Core 访问策略 `packages/db/access/account-runtime.sql` 单独审阅应用，不能在旧运行角色仍用于线上时直接启用。目标库实际应用状态须操作时核对，不能从本地迁移文件或历史记录推断。journal 0012 的归档新建/精确旧结构接管、旧 DDL 兼容与独立角色策略见[迁移与兼容方案](delivery/phase-1-migration.md)；隔离验证的历史范围见配置与最小验证记录。
 
 早期开发阶段的未验证范围见 C系列开发记录，之后获准的隔离验证和static读取发布分别见对应执行记录。不能把历史不测试要求或旧执行结果当作当前命令的副作用定义。
 
 
 ## C 系列隔离验证与预览
 
-此前隔离验证的已执行范围和日志入口见 `execution/c-series-activation.md`；该历史授权不决定当前任务是否运行测试。生产 `.env`、现用 wrangler、U2 账本不得用验证配置覆盖。
+实例的 `runtime.env` 与 U2 账本不得用验证配置覆盖。
 
 `pnpm test:db cloud-account-integration` 自动准备独立 runtime/identity/auth 测试登录并运行账号云端合成验证；不需要复制旧临时分支的配置。测试邮件由回调捕获，不投递真实邮件、不调用模型。旧 FINDME_ACCOUNT_VERIFY_CONFIG 是执行器与测试套件之间的临时配置，不是部署配置。
 
@@ -294,10 +259,6 @@ DS余额/模型目录只读鉴权失败时，不发生成请求、不自动重�
 ## 开发环境
 
 依赖准备、无生产连接的前端预览与凭据边界见[开发环境](implementation/development-environment.md)。`scripts/dev.sh` 必须读取本机 `.env`；`scripts/verify.sh` 在清洁环境安装、检查、构建并运行含临时数据库的测试，不用作仅安装依赖的环境 setup。离线AV准备器仍需要明确提供私有输入路径；当前repo不携带这些材料，不能从源码单独重建既有私人加工结果。
-
-## 备份与恢复入口
-
-`bash scripts/backup.sh` 和 `bash scripts/restore.sh /绝对路径/db.sql.gz` 会读写实际数据；连接优先级、空库约束、加密与未覆盖对象、恢复核对统一见 [Runbook](runbook.md#6-备份与恢复的现有脚本)。不要将个人 export 的 restore-prepare 当作数据库恢复。
 
 ### 当前策略只读查询
 

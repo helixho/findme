@@ -413,20 +413,6 @@ export const identityBindings = pgTable(
   }),
 );
 
-export const accessBootstrapTokens = pgTable(
-  "access_bootstrap_tokens",
-  {
-    id: id(),
-    codeHash: text("code_hash").notNull().unique(),
-    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-    usedAt: timestamp("used_at", { withTimezone: true }),
-    createdAt: createdAt(),
-  },
-  (t) => ({
-    byExpiry: index("access_bootstrap_tokens_expiry_idx").on(t.expiresAt),
-  }),
-);
-
 export const coreOperations = pgTable(
   "core_operations",
   {

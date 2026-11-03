@@ -1,9 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { createDb } from "@findme/db";
-import { migrate } from "drizzle-orm/postgres-js/migrator";
 import { ProfileService } from "../auth/profiles.js";
-import { createAccountAuth, createOwnerLogin } from "../auth/server.js";
-import { cloudOptions } from "../cloud-diagnostic/config.js";
+import { ACCOUNT_ISSUER, createAccountAuth, createOwnerLogin } from "../auth/server.js";
+import { accountOptions } from "../cloud-diagnostic/config.js";
 
 const env = process.env;
 function required(key: string) {
@@ -11,10 +10,12 @@ function required(key: string) {
   if (!value) throw new Error(`${key}_REQUIRED`);
   return value;
 }
-if (!env.DATABASE_URL_MIGRATION) throw new Error("DATABASE_URL_MIGRATION_REQUIRED");
-const admin = createDb(env.DATABASE_URL_MIGRATION, { max: 1 });
+if (!env.DATABASE_URL_ADMIN) throw new Error("DATABASE_URL_ADMIN_REQUIRED");
+const admin = createDb(env.DATABASE_URL_ADMIN, { max: 1 });
 try {
-  await migrate(admin.db, { migrationsFolder: "packages/db/migrations" });
+  // The structure is created once on an empty database; an existing database is left as it is.
+  const [structure] = await admin.sql`select to_regclass('public.tenants') is not null as ready`;
+  if (!structure?.ready) await admin.sql.unsafe(await readFile("packages/db/schema.sql", "utf8"));
   await admin.sql.unsafe(await readFile("packages/db/access/account-runtime.sql", "utf8"));
   for (const role of ["runtime", "identity", "auth"]) {
     const password = env[`DB_${role.toUpperCase()}_PASSWORD`];
@@ -29,7 +30,7 @@ try {
       `ALTER ROLE ${name} PASSWORD '${password}'; GRANT findme_${role} TO ${name}`,
     );
   }
-  const config = cloudOptions(env);
+  const config = { auth: accountOptions(env) };
   const auth = createAccountAuth({ ...config.auth, databaseUrl: required("DATABASE_URL_AUTH") });
   const identity = createDb(required("DATABASE_URL_IDENTITY"), { max: 1 });
   try {
@@ -43,10 +44,10 @@ try {
         password: required("OWNER_PASSWORD"),
       }));
     await new ProfileService(identity.db).resolve({
-      provider: `findme-account:${new URL(config.auth.baseUrl).origin}`,
+      provider: ACCOUNT_ISSUER,
       principalId: user.id,
     });
-    console.log("[setup] migrations, runtime roles and owner account ready");
+    console.log("[setup] database structure, runtime roles and owner account ready");
   } finally {
     await Promise.all([auth.close(), identity.sql.end()]);
   }

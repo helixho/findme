@@ -39,5 +39,3 @@ jobs:
         run: pnpm exec playwright install --with-deps chromium
       - name: Formal App synthetic and real PostgreSQL browser tests
         run: pnpm test:browser
-      - name: Maintained App native/private behavior
-        run: node scripts/test-maintenance-browser.mjs

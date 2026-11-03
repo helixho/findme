@@ -67,7 +67,7 @@ function graph(entries: string[]) {
 const relative = (file: string) => path.relative(root, file);
 const forbidden = (file: string) =>
   /apps\/api\/src\/(understanding-baseline|dogfood)\//.test(file) ||
-  file.endsWith("/framework-runtime/private-repository.ts");
+  file.endsWith("/helpers/file-framework-repository.ts");
 
 describe("hosted first-party value import boundaries", () => {
   it("distinguishes types, mixed bindings, re-exports and dynamic value imports", () => {
@@ -85,12 +85,10 @@ describe("hosted first-party value import boundaries", () => {
 
   it("cloud diagnostics and hosted readers never load frozen/local runners or storage", () => {
     const entries = [
-      path.join(api, "src/cloudflare.ts"),
       ...readdirSync(path.join(api, "src/cloud-diagnostic"))
         .filter((f) => f.endsWith(".ts"))
         .map((f) => path.join(api, "src/cloud-diagnostic", f)),
       ...[
-        "hosted/neon-archive-reader",
         "understanding-app/archive-runtime",
         "framework-runtime/service",
         "framework-runtime/schema",
@@ -112,7 +110,7 @@ describe("hosted first-party value import boundaries", () => {
   });
 
   it("the guard detects compatibility entries that intentionally retain local IO", () => {
-    const measured = graph([path.join(api, "src/framework-runtime/state.ts")]);
+    const measured = graph([path.join(api, "test/helpers/file-framework-repository.ts")]);
     expect(measured.files.some(forbidden)).toBe(true);
     expect(measured.edges.some(([, target]) => target === "node:fs/promises")).toBe(true);
   });

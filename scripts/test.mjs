@@ -91,13 +91,6 @@ try {
       timeout: 900_000,
       terminationGraceMs: 60_000,
     });
-    await run(process.execPath, ["scripts/test-maintenance-browser.mjs"], {
-      cwd: root,
-      env,
-      signal: controller.signal,
-      timeout: 600_000,
-      terminationGraceMs: 60_000,
-    });
   }
   console.log(`[complete] ${mode} selected scopes passed.`);
 } catch (error) {

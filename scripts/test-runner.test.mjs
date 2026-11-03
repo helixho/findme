@@ -21,12 +21,12 @@ const env = cleanEnvironment();
 
 test("inventory assigns API and browser assets, with explicit real-Postgres suffix", async () => {
   const { groups, emptyPackages, browserFiles } = await inventory(root);
-  assert.equal(dbFiles.length, 13);
+  assert.equal(dbFiles.length, 2);
   for (const file of dbFiles) assert.ok(groups.db.includes(file));
   assert.ok(groups.db.every(isDatabaseTest));
   assert.ok(browserFiles.every((file) => file.startsWith("apps/app/e2e/")));
   assert.ok(!emptyPackages.includes("apps/app"));
-  assert.ok(groups.local.includes("test/crisis.test.ts"));
+  assert.ok(groups.local.includes("test/env.test.ts"));
   assert.ok(groups.local.includes("test/framework-runtime.test.ts"));
   assert.ok(emptyPackages.includes("packages/db"));
   assert.ok(emptyPackages.includes("packages/core"));
@@ -38,18 +38,18 @@ test("inventory assigns API and browser assets, with explicit real-Postgres suff
 
 test("file filters are useful, every filter must match and unsupported flags fail", () => {
   const groups = {
-    local: ["test/crisis.test.ts", "test/framework-runtime.test.ts"],
+    local: ["test/env.test.ts", "test/framework-runtime.test.ts"],
     db: [dbFiles[0]],
   };
-  assert.deepEqual(
-    selectFiles(groups, "all", ["apps/api/test/crisis.test.ts", "framework-runtime"]),
-    { local: groups.local, db: [] },
-  );
-  assert.deepEqual(selectFiles(groups, "db", ["app.test.ts"]).db, [dbFiles[0]]);
-  for (const filters of [["missing"], ["crisis", "missing"], ["--passWithNoTests"], ["-t"], [""]]) {
+  assert.deepEqual(selectFiles(groups, "all", ["apps/api/test/env.test.ts", "framework-runtime"]), {
+    local: groups.local,
+    db: [],
+  });
+  assert.deepEqual(selectFiles(groups, "db", ["cloud-account-integration"]).db, [dbFiles[0]]);
+  for (const filters of [["missing"], ["env", "missing"], ["--passWithNoTests"], ["-t"], [""]]) {
     assert.throws(() => selectFiles(groups, "all", filters));
   }
-  assert.throws(() => selectFiles(groups, "db", ["crisis"]));
+  assert.throws(() => selectFiles(groups, "db", ["env"]));
   assert.throws(() => selectFiles(groups, "typo", []));
 });
 
@@ -98,8 +98,8 @@ test("Vitest config fails fast on direct, empty, mixed or unprovisioned DB invoc
       vitestSelection({ FINDME_TEST_GROUP: "local", FINDME_TEST_FILES: JSON.stringify(dbFiles) }),
     /Invalid/,
   );
-  const local = { FINDME_TEST_GROUP: "local", FINDME_TEST_FILES: '["test/crisis.test.ts"]' };
-  assert.deepEqual(vitestSelection(local), ["test/crisis.test.ts"]);
+  const local = { FINDME_TEST_GROUP: "local", FINDME_TEST_FILES: '["test/env.test.ts"]' };
+  assert.deepEqual(vitestSelection(local), ["test/env.test.ts"]);
   assert.throws(() => vitestSelection({ ...local, DATABASE_URL_TEST: "unexpected" }), /DB-free/);
 });
 
@@ -116,6 +116,8 @@ function fixture(failAt, controller) {
     }
     async query(sql, params) {
       calls.push(["sql", sql, params]);
+      if (failAt === "schema" && sql.includes("CREATE TABLE public.app_settings"))
+        throw new Error("schema failed");
       if (failAt === "policy" && sql.includes("BEGIN;")) throw new Error("policy failed");
       if (failAt === "roles" && sql.includes("pg_has_role"))
         return { rows: [{ member: true, rolcanlogin: true, rolsuper: true }] };
@@ -139,7 +141,6 @@ function fixture(failAt, controller) {
   }
   const fakeRun = async (command, args, options) => {
     calls.push([command, args, options]);
-    if (command === "pnpm" && failAt === "migration") throw new Error("migration failed");
     if (command !== "docker") return "";
     if (args[0] === "info" && failAt === "docker") throw new Error("Docker absent");
     if (args[0] === "create") {
@@ -179,17 +180,13 @@ function fixture(failAt, controller) {
   };
 }
 
-test("DB setup applies migration + policy before Vitest and verifies all restricted logins; cleans owned resources", async () => {
+test("DB setup applies schema + policy before Vitest and verifies all restricted logins; cleans owned resources", async () => {
   const f = fixture();
   await isolatedDatabase(f.options);
-  assert.deepEqual(f.calls.find(([cmd]) => cmd === "pnpm")[1], ["db:migrate"]);
-  const migrationEnv = f.calls.find(([cmd]) => cmd === "pnpm")[2].env;
-  assert.equal(migrationEnv.DOTENV_CONFIG_PATH, "/dev/null");
-  assert.deepEqual(
-    Object.keys(migrationEnv).sort(),
-    [...Object.keys(env), "DATABASE_URL_MIGRATION", "DOTENV_CONFIG_PATH"].sort(),
+  assert.ok(!f.calls.some(([cmd]) => cmd === "pnpm"));
+  const migration = f.calls.findIndex(
+    ([cmd, sql]) => cmd === "sql" && sql.includes("CREATE TABLE public.app_settings"),
   );
-  const migration = f.calls.findIndex(([cmd]) => cmd === "pnpm");
   const policy = f.calls.findIndex(([cmd, sql]) => cmd === "sql" && sql.includes("BEGIN;"));
   const execute = f.calls.findIndex(([cmd]) => cmd === "execute");
   assert.ok(migration < policy && policy < execute);
@@ -251,7 +248,7 @@ test("CLI rejects nonexistent and unsupported filtering before starting suites",
   }
 });
 
-for (const failure of ["docker", "create", "migration", "policy", "roles", "vitest"]) {
+for (const failure of ["docker", "create", "schema", "policy", "roles", "vitest"]) {
   test(`DB ${failure} failure stops before tests when appropriate, cleans only owned resources`, async () => {
     const f = fixture(failure);
     await assert.rejects(isolatedDatabase(f.options));

@@ -8,7 +8,6 @@ import type { Db } from "@findme/db";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PersonalContext } from "../src/core/exploration-service.js";
 import { hash as legacyHash } from "../src/dogfood/model.js";
-import { NeonArchiveReader as LegacyReader } from "../src/dogfood/neon-archive-reader.js";
 import {
   POLICY,
   PROMPTS,
@@ -16,13 +15,11 @@ import {
   validateAudit,
   validateReport,
 } from "../src/domain/understanding/policy.js";
-import { PrivateFrameworkRepository } from "../src/framework-runtime/private-repository.js";
 import { FrameworkStateSchema } from "../src/framework-runtime/schema.js";
-import { PrivateFrameworkRepository as LegacyRepository } from "../src/framework-runtime/state.js";
-import { NeonArchiveReader, restoreArchiveFile } from "../src/hosted/neon-archive-reader.js";
 import { digest, fail, hash, sha256 } from "../src/shared/primitives.js";
 import * as legacyIO from "../src/understanding-baseline/io.js";
 import * as legacyPolicy from "../src/understanding-baseline/policy.js";
+import { PrivateFrameworkRepository } from "./helpers/file-framework-repository.js";
 
 const dirs: string[] = [];
 afterEach(async () => {
@@ -84,7 +81,6 @@ describe("private framework storage remains a local adapter", () => {
     const dir = await mkdtemp(path.join(await realpath(os.tmpdir()), "findme-runtime-framework-"));
     dirs.push(dir);
     const repository = new PrivateFrameworkRepository(dir, "synthetic-owner");
-    expect(LegacyRepository).toBe(PrivateFrameworkRepository);
     expect((await repository.read()).revision).toBe(0);
     await expect(readFile(path.join(dir, "frameworks/state.json"))).rejects.toMatchObject({
       code: "ENOENT",
@@ -112,42 +108,5 @@ describe("private framework storage remains a local adapter", () => {
     stored.state.revision++;
     await writeFile(file, JSON.stringify(stored));
     await expect(repository.read()).rejects.toThrow("FRAMEWORK_STATE_INTEGRITY");
-  });
-});
-
-describe("hosted archive transport", () => {
-  it("preserves the legacy reader and verifies a synthetic gzip read without a database", async () => {
-    expect(LegacyReader).toBe(NeonArchiveReader);
-    const raw = Buffer.from('{"text":"中文😀"}');
-    const compressed = gzipSync(raw);
-    const file = {
-      path: "runtime.json",
-      bytes: raw.length,
-      sha256: sha256(raw),
-      storedBytes: compressed.length,
-      storedSha256: sha256(compressed),
-      parts: 1,
-    };
-    const parts = [{ part: 0, part_hash: sha256(compressed), data: compressed.toString("base64") }];
-    const execute = vi
-      .fn()
-      .mockResolvedValueOnce([
-        { manifest: { format: "findme-av-processed-archive@2", codec: "gzip", artifacts: [file] } },
-      ])
-      .mockResolvedValueOnce(parts);
-    const reader = new NeonArchiveReader({ execute } as unknown as Db, "synthetic", "a".repeat(64));
-    const ctx = {
-      tenantId: "11111111-1111-4111-8111-111111111111",
-      subjectId: "22222222-2222-4222-8222-222222222222",
-    } as PersonalContext;
-    expect(await reader.json(ctx, "runtime.json")).toEqual({ text: "中文😀" });
-    expect(execute).toHaveBeenCalledTimes(2);
-    await expect(reader.read(ctx, "../escape")).rejects.toThrow("ARCHIVE_READ_PATH_INVALID");
-    await expect(
-      restoreArchiveFile(file, [{ ...parts[0]!, part_hash: "0".repeat(64) }]),
-    ).rejects.toThrow("ARCHIVE_READ_PART_HASH_MISMATCH");
-    await expect(restoreArchiveFile({ ...file, bytes: raw.length - 1 }, parts)).rejects.toThrow(
-      "ARCHIVE_READ_EXPANSION_LIMIT",
-    );
   });
 });

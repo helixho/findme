@@ -9,18 +9,14 @@
     "./schema": "./src/schema.ts"
   },
   "scripts": {
-    "build": "tsc --noEmit",
-    "generate": "drizzle-kit generate",
-    "migrate": "drizzle-kit migrate"
+    "build": "tsc --noEmit"
   },
   "dependencies": {
     "drizzle-orm": "^0.45.2",
     "postgres": "^3.4.0"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^5.20260917.1",
     "@types/node": "^24.0.0",
-    "drizzle-kit": "^0.31.11",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }

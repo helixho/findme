@@ -13,11 +13,9 @@ import { defineFramework } from "../src/framework-runtime/definition.js";
 import { human3Draft } from "../src/framework-runtime/definitions/human3-draft.js";
 import { assertions } from "../src/framework-runtime/policy.js";
 import { frameworkRoutes } from "../src/framework-runtime/routes.js";
+import type { FrameworkRepository } from "../src/framework-runtime/schema.js";
 import { FrameworkService } from "../src/framework-runtime/service.js";
-import {
-  type FrameworkRepository,
-  PrivateFrameworkRepository,
-} from "../src/framework-runtime/state.js";
+import { PrivateFrameworkRepository } from "./helpers/file-framework-repository.js";
 const dirs: string[] = [];
 afterEach(async () => {
   await Promise.all(dirs.splice(0).map((d) => rm(d, { recursive: true, force: true })));

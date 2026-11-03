@@ -34,28 +34,6 @@ export function cloudDataRoutes(
 ) {
   const app = new Hono();
   app.use("*", bodyLimit({ maxSize: 2 * 1024 * 1024 }));
-  const u2Import = services.u2Import;
-  if (u2Import) {
-    app.post("/u2-import/preview", async (c) => {
-      const body = await c.req.json().catch(() => ({}));
-      z.object({}).strict().parse(body);
-      return c.json(await u2Import.preview(await contextFor(c)), 201);
-    });
-    app.post("/u2-import/:id/confirm", async (c) => {
-      const input = z
-        .object({ input_hash: z.string().regex(/^[a-f0-9]{64}$/), confirm: z.literal(true) })
-        .strict()
-        .parse(await c.req.json());
-      return c.json(await u2Import.confirm(await contextFor(c), id(c), input.input_hash));
-    });
-    app.post("/u2-import/:id/commit", async (c) => {
-      const input = z
-        .object({ input_hash: z.string().regex(/^[a-f0-9]{64}$/), confirm: z.literal(true) })
-        .strict()
-        .parse(await c.req.json());
-      return c.json(await u2Import.commit(await contextFor(c), id(c), input.input_hash));
-    });
-  }
   app.get("/sources", async (c) =>
     c.json(
       await services.lifecycle.sources(await contextFor(c), Number(c.req.query("cursor") ?? 0)),

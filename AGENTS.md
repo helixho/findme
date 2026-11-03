@@ -18,9 +18,7 @@
 | [ADR](docs/adr.md) | 重要选择的理由和取舍；不作日常变更日志 |
 | [术语与编号](docs/glossary.md) | 区分 GAP 差距、G 交付门及领域状态，历史编号按映射解释 |
 | [第一阶段测试计划](docs/delivery/phase-1-test-plan.md) | 可重复测试入口、环境、选测范围与未覆盖层；不代替本人效用验收 |
-| [运行与恢复规程](docs/runbook.md) | 既有发布、回滚和停用保护的操作索引；不表示资源已启用 |
-| [账号部署准备](deployment/README.md) | 运行组合与配置入口；迁移顺序引用当前方案，不保存线上迁移状态 |
-| [第一阶段迁移与兼容](docs/delivery/phase-1-migration.md) | journal 归档接管、旧 DDL 兼容/角色顺序、导入对账及失败恢复；不授权执行 |
+| [单节点部署](deployment/standalone/README.md) | 一键部署、配置与数据位置、换节点与故障定位；不保存实例状态 |
 | [第一阶段业务接受记录](docs/delivery/acceptance.md) | P1-AC-01–09 的本人接受及证据入口；未执行不代签 |
 | [债务逐项核对](docs/delivery/debt-resolution.md) | 原始 CD/AD/TD/DOC 编号映射、反证、修复与真实未完边界 |
 | [审查说明](REVIEW.md) | 本项目的阻断范围、次要上限、不审范围、必查项、证据要求与审查轮次上限；人工与自动审查共用 |

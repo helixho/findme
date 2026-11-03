@@ -82,7 +82,7 @@ Kit 的角色合并为三类，职责差异保留：
 | ART-AUTH 身份权限设计 | merged | [C 系列契约](implementation/c-series-cloud-runtime.md) §1；[TA](ta.md) §3；[Roadmap](roadmap.md) 安全与运行边界核验 | G2 | 交互式 owner-account:create 已有，绑定现有 owner scope；真实开通未由文档证明 |
 | ART-BEHAVIOR 状态时序与并发 | merged | [可靠性契约](implementation/t1-r1.md) §3–6；[C 系列契约](implementation/c-series-cloud-runtime.md) §2 | G2 | 已有 |
 | ART-RECOVERY 异常与恢复设计 | merged | [可靠性契约](implementation/t1-r1.md) §7；[C 系列契约](implementation/c-series-cloud-runtime.md) §2、§4 | G2 | 导入与迁移的失败恢复随 ART-MIGRATION 补 |
-| ART-MIGRATION 迁移与兼容设计 | required | [第一阶段迁移与兼容](delivery/phase-1-migration.md) | G2 | journal归档接管顺序、角色、导入与兼容已成文；实际目标依赖、迁移/对账及快照退役仍未验证 |
+| ART-MIGRATION 迁移与兼容设计 | required | 第一阶段迁移与兼容 | G2 | journal归档接管顺序、角色、导入与兼容已成文；实际目标依赖、迁移/对账及快照退役仍未验证 |
 
 ### D4 准备
 
@@ -94,7 +94,7 @@ Kit 的角色合并为三类，职责差异保留：
 | ART-TESTCASES 用例与覆盖设计 | merged | `apps/api/test/`；[测试计划](delivery/phase-1-test-plan.md) | G3 | 已按变更/AC 说明相关套件与未覆盖层；不是全部 AC 已有自动用例 |
 | ART-TESTENV 测试数据环境与组合 | merged | [测试计划](delivery/phase-1-test-plan.md)“工程入口” | G3 | 临时 PostgreSQL、迁移及分离角色由运行器准备；真实部署组合仍未覆盖 |
 | ART-TESTENTRY 正式送测包 | merged | 测试计划的“进入、退出与候选记录” | G3 | 候选、选测范围、日志和未测项随执行记录固定，不代替完整产品送测 |
-| ART-RUNBOOK 部署与恢复规程 | required | [运行与恢复规程](runbook.md) | G3 | 已集中既有发布、回滚与停用保护；新账号运行依赖和真实迁移方案仍待确定，不恢复原 Neon |
+| ART-RUNBOOK 部署与恢复规程 | required | 运行与恢复规程 | G3 | 已集中既有发布、回滚与停用保护；新账号运行依赖和真实迁移方案仍待确定，不恢复原 Neon |
 
 ### D5 证据
 

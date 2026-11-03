@@ -1,14 +1,10 @@
 import { z } from "zod";
 import type { AccountConfig } from "../auth/server.js";
+import type { ModelSettings } from "../standalone/settings.js";
 import type { CloudProcessingOptions } from "./processing.js";
-const number = (value: string | undefined, fallback: number, max: number) =>
-  z.coerce
-    .number()
-    .int()
-    .min(0)
-    .max(max)
-    .parse(value ?? fallback);
-export function cloudOptions(env: Record<string, string | undefined>) {
+
+/** Account startup configuration from the environment. */
+export function accountOptions(env: Record<string, string | undefined>) {
   const origins = (env.ACCOUNT_TRUSTED_ORIGINS ?? "")
     .split(",")
     .map((s) => s.trim())
@@ -44,22 +40,24 @@ export function cloudOptions(env: Record<string, string | undefined>) {
         }
       : undefined,
   };
+  return auth;
+}
+
+/** Processing budgets derived from the stored model settings. */
+export function processingOptions(settings: ModelSettings) {
+  const enabled = settings.enabled && settings.apiKey.length > 0;
   const processing: CloudProcessingOptions = {
-    enabled: env.CLOUD_INFERENCE_ENABLED === "1",
-    profileCallLimit: number(env.CLOUD_PROFILE_CALL_LIMIT, 0, 100000),
-    maxCallsPerJob: number(env.CLOUD_JOB_CALL_LIMIT, 4, 20),
-    maxOutputTokens: number(env.CLOUD_MAX_OUTPUT_TOKENS, 6000, 16000),
-    timeoutMs: number(env.CLOUD_TIMEOUT_MS, 90000, 120000),
+    enabled,
+    profileCallLimit: settings.profileCallLimit,
+    maxCallsPerJob: settings.jobCallLimit,
+    maxOutputTokens: 6000,
+    timeoutMs: 90000,
   };
-  // Owner decision 2026-10-31: conversation processing is automatic but needs the
-  // global inference switch plus an explicit rolling-24h operation limit (default 0 = off).
-  const coreDailyOperationLimit =
-    env.CLOUD_INFERENCE_ENABLED === "1" ? number(env.CORE_MODEL_DAILY_OPERATION_LIMIT, 0, 1000) : 0;
   return {
-    auth,
     processing,
-    coreModel: { dailyOperationLimit: coreDailyOperationLimit },
-    allowDraftFrameworks: env.CLOUD_ALLOW_DRAFT_FRAMEWORKS === "1",
-    frameworkCallLimit: number(env.CLOUD_FRAMEWORK_CALL_LIMIT, 0, 100000),
+    // Conversation processing is automatic but needs the inference switch plus an explicit
+    // rolling-24h operation limit (0 = off).
+    coreModel: { dailyOperationLimit: enabled ? settings.coreDailyOperationLimit : 0 },
+    frameworkCallLimit: settings.frameworkCallLimit,
   };
 }

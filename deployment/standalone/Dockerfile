@@ -11,7 +11,7 @@ COPY packages/shared/package.json ./packages/shared/package.json
 RUN pnpm install --frozen-lockfile
 COPY . .
 RUN pnpm --filter @findme/api build
-RUN VITE_APP_AUTH_MODE=account VITE_CORE_API_BASE= pnpm --filter @findme/app build
+RUN VITE_CORE_API_BASE= pnpm --filter @findme/app build
 RUN pnpm --filter @findme/api deploy --prod /runtime
 RUN cp -r apps/api/dist /runtime/dist
 
@@ -22,7 +22,7 @@ WORKDIR /app
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=8000
 COPY --from=build /runtime/ ./
 COPY --from=build /src/apps/app/dist ./public
-COPY packages/db/migrations ./packages/db/migrations
+COPY packages/db/schema.sql ./packages/db/schema.sql
 COPY packages/db/access ./packages/db/access
 RUN mkdir -p /data/files && chown node:node /data/files
 USER node

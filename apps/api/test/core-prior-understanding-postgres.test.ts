@@ -1,7 +1,6 @@
 import { coreSchema, createDb } from "@findme/db";
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { createApp } from "../src/app.js";
 import { invalidateCloudSources } from "../src/cloud-diagnostic/effects.js";
 import { continueExplorationWith } from "../src/core/exploration-planning.js";
 import { correctUnderstandingWith } from "../src/core/exploration-revision.js";
@@ -9,6 +8,7 @@ import { directCoreStore } from "../src/core/exploration-types.js";
 import { resolvePersonalContext } from "../src/core/identity.js";
 import { beginCoreOperation } from "../src/core/operations.js";
 import { PRIOR_SELECTION_VERSION } from "../src/core/prior-understanding.js";
+import { coreTestApp } from "./helper.js";
 
 // Synthetic P1 main-chain scenario: an understanding formed in one experience is
 // offered to the next, narrowed by new input, used in its narrowed form later,
@@ -236,13 +236,13 @@ function scenarioGateway(calls: Call[], hooks: { onExtract?: () => Promise<void>
     },
     chat: async () => ({ text: "" }),
     describe: (route: string) => ({ route, model: "test-observation-model" }),
-  } as unknown as NonNullable<Parameters<typeof createApp>[0]["gateway"]>;
+  } as unknown as NonNullable<Parameters<typeof coreTestApp>[0]["gateway"]>;
 }
 
 dbDescribe("P1 main chain: prior understanding in the next exploration", () => {
   const { db, sql } = createDb(testUrl ?? "");
   const calls: Call[] = [];
-  const app = createApp({
+  const app = coreTestApp({
     db,
     gateway: scenarioGateway(calls),
     auth: { mode: "static", accessToken: "secret" },
@@ -251,7 +251,7 @@ dbDescribe("P1 main chain: prior understanding in the next exploration", () => {
 
   beforeEach(async () => {
     calls.length = 0;
-    await sql.unsafe("TRUNCATE TABLE tenants, access_bootstrap_tokens RESTART IDENTITY CASCADE");
+    await sql.unsafe("TRUNCATE TABLE tenants RESTART IDENTITY CASCADE");
   });
   afterAll(async () => {
     await sql.end();

@@ -12,7 +12,6 @@ const config = Object.fromEntries(
       return [line.slice(0, split), line.slice(split + 1)];
     }),
 );
-assert.equal(config.CLOUD_INFERENCE_ENABLED, "0", "Verification requires inference disabled");
 const base = config.FINDME_PUBLIC_URL;
 const evidence = process.env.FINDME_VERIFY_STATE ?? "/tmp/findme-standalone-verification.json";
 let cookie = "";
@@ -58,6 +57,8 @@ cookie = login.headers
   .map((value) => value.split(";")[0])
   .join("; ");
 assert(cookie);
+const model = await (await request("/api/settings/model")).json();
+assert.equal(model.enabled, false, "Verification requires model calls disabled");
 await request("/api/not-a-route", "GET", undefined, 404);
 let saved;
 if (process.argv[2] === "verify") {

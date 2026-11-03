@@ -3,6 +3,9 @@ import { Pool } from "pg";
 import { z } from "zod";
 import { betterAuthSessions } from "./account.js";
 
+/** Login identity issuer. Independent of the instance URL so a rebuilt node keeps its accounts. */
+export const ACCOUNT_ISSUER = "findme-account";
+
 export type AccountConfig = {
   databaseUrl: string;
   secret: string;
@@ -132,7 +135,7 @@ export function createAccountAuth(config: AccountConfig) {
   });
   return {
     auth,
-    sessions: betterAuthSessions(auth, `findme-account:${url.origin}`),
+    sessions: betterAuthSessions(auth, ACCOUNT_ISSUER),
     close: () => pool.end(),
   };
 }

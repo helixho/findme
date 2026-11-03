@@ -9,7 +9,6 @@
   "scripts": {
     "dev:api": "pnpm --filter @findme/api dev",
     "dev:app": "pnpm --filter @findme/app dev",
-    "av:dogfood": "pnpm --filter @findme/api av:dogfood",
     "build": "pnpm -r build",
     "lint": "biome check .",
     "format": "biome format --write .",
@@ -17,12 +16,6 @@
     "test:local": "node scripts/test.mjs local",
     "test:db": "node scripts/test.mjs db",
     "test:runner": "node --test scripts/test-runner.test.mjs",
-    "db:generate": "pnpm --filter @findme/db generate",
-    "db:migrate": "pnpm --filter @findme/db migrate",
-    "cf:dev": "wrangler dev",
-    "cf:deploy": "wrangler deploy",
-    "app:open": "bash scripts/open-app.sh",
-    "app:deploy": "pnpm --filter @findme/app build && wrangler deploy --config wrangler.app.jsonc",
     "av:layers": "pnpm --filter @findme/api av:layers",
     "av:layers:view": "pnpm --filter @findme/api av:layers:view",
     "diagnostic:reason": "pnpm --filter @findme/api diagnostic:reason",
@@ -36,18 +29,13 @@
     "test:coverage:local": "node scripts/test.mjs coverage local",
     "test:coverage:db": "node scripts/test.mjs coverage db",
     "policy:inspect": "pnpm --filter @findme/api exec tsx scripts/policy-inspect.ts",
-    "test:browser:maintenance": "node scripts/test-maintenance-browser.mjs",
     "check:repo": "node scripts/check-repository.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "catalog:",
-    "@cloudflare/workers-types": "^5.20260917.1",
-    "@neon/config": "^1.7.0",
-    "@neon/env": "^1.4.1",
     "@playwright/test": "1.64.1",
     "@vitest/coverage-v8": "4.1.12",
-    "typescript": "catalog:",
-    "wrangler": "^4.133.0"
+    "typescript": "catalog:"
   },
   "pnpm": {
     "overrides": {

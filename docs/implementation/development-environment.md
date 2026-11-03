@@ -33,12 +33,8 @@ VITE_APP_AUTH_MODE=static VITE_CORE_API_BASE="" pnpm --filter @findme/app exec v
 
 发布走已核实目标的 Wrangler 配置，账号模式启用要点见 `deployment/README.md`，示例中的 REPLACE 不是可用值。生产迁移、数据导入、服务恢复或付费调用先形成具体、可审阅的目标与影响，再按授权执行；回滚 Worker 不回滚 Neon 数据。
 
-## 按模式准备最小配置
+## 本机开发配置
 
-仅在需要本机 API 的开发任务中，从根 `.env.example` 复制到忽略的 `.env` 并填本次获准目标；不复制实际生产配置。纯 `/diagnostic-preview` 不需 `.env`、数据库或模型。`dev.sh` 检查配置的要求不等于必须恢复 Neon；可用的本地开发库也可满足连接契约，临时数据库测试仍用测试运行器。
+仅在需要本机 API 的开发任务中，从根 `.env.example` 复制到忽略的 `.env`，填写本机开发库的 runtime/identity/auth 三个连接、`ACCOUNT_SECRET`、base URL 与 trusted origins；不复制实际节点的 `runtime.env`。空库先执行一次 `packages/db/schema.sql` 和 `packages/db/access/account-runtime.sql`，或直接用部署脚本在本机 Docker 中初始化。纯 `/diagnostic-preview` 不需要 `.env`、数据库或模型。
 
-Node static 最小为 DATABASE_URL_RUNTIME（或 DATABASE_URL）、APP_AUTH_MODE=static、APP_ACCESS_TOKEN、非空 DEEPSEEK_MODEL；模型占位只满足启动校验，不表示能推理。session 模式改为 APP_LOGIN_PASSWORD；none 仅限明确的本地开发，不能挂报告桥。真实模型调用才需要有效 provider/key 与实际预算授权。
-
-账号模式的最小读取/保存配置见 [cloud-account.env.example](../../deployment/cloud-account.env.example)：独立 runtime/identity/auth URL、ACCOUNT_SECRET、base URL/trusted origins 和 App account/API base；先准备迁移与角色。注册关闭时不需要邮件配置；推理关闭时不需要有效模型 key，但 Node env 的 model 仍须非空。异步处理另需队列 dispatcher 或 Worker queue 绑定和明确预算。Worker 通过 FINDME_ACCOUNT_MODE 与独立 Hyperdrive 绑定组合，不把 Node URL 模板直接当 Wrangler 绑定配置。
-
-旧 `packages/db/src/seed.ts` 与 seed 内容用于 legacy/测试素材，不是账号零历史起步的前置；API 启动不自动 seed。仓库外私人 U2/AV 文件和 FINDME_U3_OWNER_* 仅供冻结私有 adapter，不加入新账号最小配置。测试 DATABASE_URL_TEST 由 `pnpm test:db` 生成，无需在日常 `.env` 保存测试凭据。
+模型服务商、密钥与预算不在环境变量中，登录后在 App 的“模型设置”里填写并保存到数据库。测试用的 `DATABASE_URL_TEST` 由 `pnpm test:db` 生成，无需在日常 `.env` 保存测试凭据。

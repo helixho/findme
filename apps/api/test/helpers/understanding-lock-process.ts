@@ -1,6 +1,6 @@
 // A real independent Node process. Only the generated directory passed by the test is used.
 import { BatchStore } from "../../src/dogfood/store.js";
-import { PrivateFrameworkRepository } from "../../src/framework-runtime/private-repository.js";
+import { PrivateFrameworkRepository } from "./file-framework-repository.js";
 
 const [kind, directory, operation] = process.argv.slice(2);
 const watchdog = setTimeout(() => process.exit(70), 10_000);

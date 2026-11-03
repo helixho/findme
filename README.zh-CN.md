@@ -47,7 +47,7 @@ pnpm install --frozen-lockfile
 产品和架构文档说明预期行为，As-Is 说明已实现行为，Roadmap 说明剩余工作。此 README 用于快速了解项目，不表示计划能力已经完成。
 
 
-文档修复与原审查编号对照见[债务台账](docs/delivery/debt-resolution.md)；账号运行准备见[迁移与兼容](docs/delivery/phase-1-migration.md)，实际本人接受见[第一阶段接受记录](docs/delivery/acceptance.md)。环境模板须按[模式选择](docs/implementation/development-environment.md#按模式准备最小配置)，旧 seed 不作为账号零历史起步的前置。
+文档修复与原审查编号对照见[债务台账](docs/delivery/debt-resolution.md)；实际本人接受见[第一阶段接受记录](docs/delivery/acceptance.md)。环境模板须按[模式选择](docs/implementation/development-environment.md#本机开发配置)，旧 seed 不作为账号零历史起步的前置。
 
 ## 许可证
 

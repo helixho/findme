@@ -19,83 +19,13 @@
 - Core API 使用稳定错误码处理 stale version/current revision/idempotency/source conflict；目标 App 会复用 mutation key、轮询 operation，并对 stale/needs_review/empty outcome 做显式呈现。
 实现入口：`apps/api/src/core/`、`packages/core/src/`、`packages/db/src/schema-core.ts`、`apps/app/src/`。单次探索流程的详细契约在 `implementation/t1-purposeful-exploration.md`，可靠性契约在 `implementation/t1-r1.md`；本文不复制接口字段与策略常量。
 
-## 2. Legacy V1 行为
+## 2. 运行方式
 
-Android/Capacitor 原生包装工程及 APK 构建入口已移除。独立 `apps/web` 与 `apps/miniapp` 已从仓库退役；唯一客户端 `apps/app` 是 React 19 + Vite 浏览器 SPA，手机 H5 与桌面共用代码，保留自身 native/private/diagnostic-preview/dogfood 兼容分支。
-
-旧版已完成第一批源码清理：宿主静态服务器、Node 常驻轮询 worker、heartbeat 写入器及其专属配置已移除；保留 Cloudflare Queue 使用的按任务 ID 领取与消费。Node API 启动不再自动执行旧 seed。客户端删除不扩展到旧 API、Queue、schema、migration、用户数据及仍使用的学习素材。后端 `wrangler.jsonc` 不再绑定旧 Web 静态资产，仅服务既有 API、health、internal 队列；其他路径 404，且不创建数据库连接。独立 `wrangler.app.jsonc` 继续托管 `apps/app/dist`；仓库变更未部署，不代表线上旧页面已退出。
-
-两套 schema 共存不等于数据语义兼容：Core 读取 source_items/claims 等独立对象，尚无将 raw_records/light_extracts/insights 映射为 Core 来源、证据和认识的 adapter。旧 schema 和完整 migration 链保留，避免后续 schema 生成误删旧表，也保留历史资产接入能力。
-
-| 范围 | 源码可见的当前行为 | 可复核位置 |
-| --- | --- | --- |
-| 原始输入 | 速记、对话、文本导入、答题和阅读反馈写 raw_records | [records.ts](../apps/api/src/routes/records.ts)、[questionnaires.ts](../apps/api/src/routes/questionnaires.ts)、[materials.ts](../apps/api/src/routes/materials.ts) |
-| 数据结构 | raw_records、light_extracts、insights、insight_feedback 等结构；来源/内容有 JSONB 扩展，未见个人租户归属字段 | [schema.ts](../packages/db/src/schema.ts) |
-| 对话 | 当前消息持久化，history 用于生成回复；并非以完整对话上下文进入轻量抽取 | [records.ts](../apps/api/src/routes/records.ts)、[process.ts](../apps/api/src/tasks/process.ts) |
-| 轻量抽取 | 主题、情绪线索、对象、标签、摘录及模型置信度；输入为 content.text | [extract.ts](../apps/api/src/llm/extract.ts)、[process.ts](../apps/api/src/tasks/process.ts) |
-| 画像 | 八维加综合画像，分别调用生成后保存一份快照 | [insight.ts](../apps/api/src/llm/insight.ts)、[profile.ts](../apps/api/src/llm/profile.ts) |
-| 深析与临时问答 | 深析生成固定字段结果；问答使用同一 buildCorpus，支持三视角描述 | [deepdive.ts](../apps/api/src/llm/deepdive.ts)、[insights.ts](../apps/api/src/routes/insights.ts) |
-| 证据回看 | 生成时语料行号映射到真实 record_id，客户端可请求记录摘要 | [evidence.ts](../apps/api/src/llm/evidence.ts)、[records.ts](../apps/api/src/routes/records.ts) |
-| 用户反馈 | 支持保存重要洞察、确认/否认/补充及准确性反馈 | [insights.ts](../apps/api/src/routes/insights.ts) |
-| 主题回顾 | 对有限窗口内的 topics/tags 计数 | [review.ts](../apps/api/src/routes/review.ts) |
-| 学习内容 | repo seed 提供材料与题组；导入脚本从外部 corpus exports 接收内容；反馈回流个人记录 | [import-corpus-seeds.mjs](../scripts/import-corpus-seeds.mjs)、[materials.ts](../apps/api/src/routes/materials.ts) |
-| 历史 Web 呈现 | 记录、探索、洞察三类入口，设置单独进入；独立客户端现已退役，不是当前产品能力 | 退役前 `apps/web/src/App.tsx`（未随公开仓库发布） |
-| 工程基础 | API、数据库包、共享契约、Web、miniapp 以及异步任务处理资产 | [package.json](../package.json)、[packages/db](../packages/db)、[tasks](../apps/api/src/tasks) |
-
-## 3. 对现有数据链路的精确说明
-
-本节仅说明 legacy V1。新版 Core 的事实以 §1 为准，不将旧版的反馈、窗口和 confidence 限制套用为整个项目现状。
-
-### 3.1 文本导入不是完整的事件/会话导入
-
-`records.ts` 按固定大小和分块上限切分输入。接口接收 text 和批次级 source_meta；切分结果复用这份 metadata，没有逐事件归属、原始时段、引用角色或旧洞察的统一迁移契约。超过分片上限的内容通过 slice 被截断。
-
-这证明的是当前接口行为，不能据此制定用户原始表达长度的业务要求。重导入也不能只因同一任务的重试幂等，就视为已具备来源级去重。
-
-### 3.2 当前语料是最新抽取窗口
-
-`profile.ts` 的 buildCorpus 将 active 原始记录与抽取结果关联，按抽取时间倒序读取有限窗口；生成文本为主题、情绪、对象、证据片段及记录创建日期。不是完整原文检索，也不是跨时间的长期认识库。
-
-同一原始记录的多次抽取可以占用多行，recordCount 为行数；证据 ID 解析虽去重，输入覆盖并未因此自动变成独立事件覆盖。历史导入经当前通用接口形成新记录时，画像时间使用 createdAt，不读取 metadata 中可能存在的原始发生时间。
-
-`insights.ts` 以最新快照的 recordCount 与本次 count 相等作为 up_to_date 判断。由代码可推导：达到窗口上限后，内容换入但数量不变也可能阻止正常更新；这是基于源码的行为推导。
-
-### 3.3 当前溯源不是语义有效性验证
-
-`evidence.ts` 解析并过滤模型返回的行号，可以避免引用不存在于当次集合的 ID；它不核验摘录与原文匹配，也不判断原文是否支持给出的原因解释。
-
-保存洞察接口要求非空 evidence_record_ids，但该要求本身不等于完成了逐论断支持度、来源独立性或多租户归属验证。相关测试使用 fake gateway，证明结构和处理规则，不证明人格准确性。
-
-### 3.4 反馈存在，但未参与画像更新
-
-反馈写入 insight_feedback，acknowledgmentHistory 保留动作，deny 可隐藏洞察。当前 buildCorpus/画像生成路径没有读取这些反馈，也没有将已确认/修订认识作为长期可更新的核心。现有“认/不认”不是新基线要求的认识修订闭环。
-
-### 3.5 当前排除行为不统一
-
-画像语料在 join 时过滤 raw_records.visibility；主题回顾直接读取 light_extracts，未执行相同过滤。证据按 ID 回看有意允许显示历史隐藏记录。隐藏、分析排除、证据保留与删除尚不能当作一套统一的目标生命周期契约。
-
-### 3.6 深析文本不是行动执行闭环
-
-深析要求给出循环、矛盾、建议、挑战等固定字段；源码可生成这些文本，但未见独立 Goal、已接受尝试、结果与复盘状态机。不能把“模型生成行动建议”计为目标 B6 已完整实现。
-
-### 3.7 旧文档中的实现声明需回到源码核对
-
-旧 As-Is 写有“对话保存角色与 prompt 版本快照”，但当前 [records.ts](../apps/api/src/routes/records.ts) 只将用户消息和 role 写入 content/sourceMeta；[dialogue.ts](../apps/api/src/llm/dialogue.ts) 使用后端 ROLE_PROMPT 常量生成回复，未见该入口持久化当次完整 prompt/版本快照。它应回到目标能力与差距，不能从旧正文复制成已完成。
-
-当前 [export.ts](../apps/api/src/routes/export.ts) 返回 raw_records、light_extracts、insights 三类数据，没有读取 insight_feedback 等其他私人对象。因此是现有核心记录 JSON 导出，不足以证明完整个人数据包或用户选择的一页摘要已实现。
-
-当前 [questionnaires.ts](../apps/api/src/routes/questionnaires.ts) 将作答与上下文写入记录，未形成独立版本化测评结果/确定性计分。旧运行与鉴权描述不能替代当前配置和源码。
-
-### 3.8 已有 confidence 字段，不等于已实现分层证据评估
-
-[extract.ts](../apps/api/src/llm/extract.ts) 要求模型报告本次归纳贴合原文的 confidence；[insight.ts](../apps/api/src/llm/insight.ts) 同样接收模型自报数值。[共享契约](../packages/shared/src/records.ts) 校验其为 0–1 数字，[schema.ts](../packages/db/src/schema.ts) 为 light_extracts 保存 confidence。这是已有自评字段和结构校验，不是来源质量、逐认识贡献或概率校准的实现。
-
-[profile.ts](../apps/api/src/llm/profile.ts) 的 buildCorpus 仍按抽取时间取窗口，将主题/情绪/对象/摘录拼接，未依据这些 confidence 做分层评估。[evidence.ts](../apps/api/src/llm/evidence.ts) 仅做行号到记录的映射及去重；[insights.test.ts](../apps/api/test/insights.test.ts) 使用 fake gateway 验证相关结构行为。当前核对的链路未见版本化来源评估、按 ClaimRevision 的贡献评估及其失效传播；模型自评分不代表校准结果。
-
+唯一运行方式是单节点：一个 Node 进程提供网页、API 和后台执行器，账号模式是唯一登录方式，数据库为任意 PostgreSQL（默认同节点容器）。旧的静态/会话/私有模式、旧版速记/洞察/问卷/素材接口、旧任务队列及其数据表，以及 Cloudflare Worker 与 Neon 专用读取已从源码移除。表结构只有一份当前定义 [schema.sql](../packages/db/schema.sql)，仅在空库时建表；账号角色与行级策略见 [account-runtime.sql](../packages/db/access/account-runtime.sql)。模型服务商、密钥与预算是存在数据库 `app_settings` 中的应用设置，在 App 中修改并即时生效。登录身份的签发者固定为 `findme-account`，与实例网址无关。
 
 ## 4. AV 本人小批内测（独立 staging）
 
-`apps/api/src/dogfood/`、`apps/api/scripts/av-dogfood.ts` 和 `apps/app/src/Dogfood.tsx` 提供小批历史验证入口。AV 以只读 SQLite 事务接入；仓库外批次保留完整选定原文、固定 split、来源定位、候选片段、人工审核、生成版本与逐请求账本。普通 `role=user` 不直接决定作者和观点，归属和语义判断仍是需要复核的模型候选。
+`apps/api/src/dogfood/` 保留小批历史验证的离线处理代码；原 `av-dogfood` 本地服务与 App 内 Dogfood 页面已移除，资料导入将作为独立的导入功能或适配器另行实现。AV 以只读 SQLite 事务接入；仓库外批次保留完整选定原文、固定 split、来源定位、候选片段、人工审核、生成版本与逐请求账本。普通 `role=user` 不直接决定作者和观点，归属和语义判断仍是需要复核的模型候选。
 
 模型输出经原文引用定位和用途资格检查，抽取与生成支持有限预算、checkpoint、显式失败重试；来源更正/排除可以立即使相关候选与认识失效。结构化分析与原文对照使用同一已处理范围及必要指代上下文，未处理范围不伪装成已分析。CLI 默认 dry-run；页面读取不自动调用模型。
 
@@ -209,7 +139,7 @@ Node 私有 adapter 只接受明确配置的 Core owner，每次读取、处理�
 
 ### 11.1 Neon归档的只读适配
 
-`dogfood/processed-archive.ts` 定义加工白名单、去重gzip包、逐层哈希与有界幂等导入事务；两个CLI只离线准备，不自行建表或上传。两张归档表已由 `schema-archive.ts` 与 journal `0012_open_lionheart` 纳管；新库建表与精确旧 DDL 接管、访问策略边界见[迁移方案](delivery/phase-1-migration.md)。`hosted/neon-archive-reader.ts`（`dogfood/neon-archive-reader.ts` 保留兼容导出） 通过既有数据库连接读取指定tenant/subject、namespace、批次哈希及complete状态，限定路径、大小并校验分块/压缩/原文哈希，适用于Worker且没有文件系统依赖。
+`dogfood/processed-archive.ts` 定义加工白名单、去重gzip包、逐层哈希与有界幂等导入事务；两个CLI只离线准备，不自行建表或上传。两张归档表已由 `schema-archive.ts` 与 journal `0012_open_lionheart` 纳管；新库建表与精确旧 DDL 接管、访问策略边界见迁移方案。`hosted/neon-archive-reader.ts`（`dogfood/neon-archive-reader.ts` 保留兼容导出） 通过既有数据库连接读取指定tenant/subject、namespace、批次哈希及complete状态，限定路径、大小并校验分块/压缩/原文哈希，适用于Worker且没有文件系统依赖。
 
 `understanding-app/archive-runtime.ts` 读取固定的便携报告快照，核对来源归档、报告结构、版本和精确证据引用集合；`routes/archive-understanding.ts` 提供报告、版本、历史和证据GET接口。`cloudflare.ts` 只有配置哈希时才注入，`app.ts` 限定static鉴权且不与NativeReportService混用。它不追踪原来源的实时资格变化，所有POST拒绝为ARCHIVE_READ_ONLY，不提供反馈、处理、Framework或完整sourceLifecycle。此适配与上文Node私有repository是不同实现，不能将其能力互相继承。
 

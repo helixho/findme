@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { cloudFile, cloudMutation, cloudRequest, currentCloudProfile } from "../cloud-api";
-import { type OwnerImportPreview, type Source, download, jsonDownload, message } from "./shared";
+import { type Source, download, jsonDownload, message } from "./shared";
 
 export function DataPanel() {
   const [error, setError] = useState("");
@@ -13,8 +13,6 @@ export function DataPanel() {
     items: unknown[];
     holdout_omitted: number;
   } | null>(null);
-  const [ownerImport, setOwnerImport] = useState<OwnerImportPreview | null>(null);
-  const [ownerImportResult, setOwnerImportResult] = useState("");
   const [blobs, setBlobs] = useState<
     { id: string; status: string; media_type: string; byte_length: number }[]
   >([]);
@@ -86,86 +84,6 @@ export function DataPanel() {
           导出完整结构化数据包
         </button>
       </div>
-      <section className="home-section">
-        <h3>导入已审核专题</h3>
-        <p>
-          从服务端固定归档读取原 U2
-          审核结果、报告与精确引文。先预览，再确认并提交；不会调用模型，也不会导入未通过专题或缺失的综合总览。
-        </p>
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() =>
-            void action(async () => {
-              setOwnerImportResult("");
-              setOwnerImport(
-                await cloudMutation<OwnerImportPreview>("/api/data/u2-import/preview", {}),
-              );
-            })
-          }
-        >
-          预览固定归档
-        </button>
-        {ownerImport && (
-          <div>
-            <p>
-              {ownerImport.reports.length} 个已审核专题 · 状态 {ownerImport.status} · 来源指纹{" "}
-              {ownerImport.source_fingerprint.slice(0, 12)}…
-            </p>
-            <ul>
-              {ownerImport.reports.map((report) => (
-                <li key={`${report.domain}:${report.version}`}>
-                  {report.domain} · 精确依据 {report.evidence_count} 条
-                </li>
-              ))}
-            </ul>
-            {ownerImport.status === "preview" && (
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() =>
-                  void action(async () => {
-                    if (!window.confirm("确认这批已审核专题属于当前 Profile，并进入提交准备？"))
-                      return;
-                    const result = await cloudMutation<{ status: "confirmed" }>(
-                      `/api/data/u2-import/${ownerImport.id}/confirm`,
-                      { input_hash: ownerImport.input_hash, confirm: true },
-                    );
-                    setOwnerImport({ ...ownerImport, status: result.status });
-                  })
-                }
-              >
-                确认归属与范围
-              </button>
-            )}
-            {ownerImport.status === "confirmed" && (
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() =>
-                  void action(async () => {
-                    if (!window.confirm("将这批已审核专题写入当前 Profile？不调用模型。")) return;
-                    const result = await cloudMutation<{
-                      status: "committed";
-                      imported: { domain: string }[];
-                      model_calls: 0;
-                    }>(`/api/data/u2-import/${ownerImport.id}/commit`, {
-                      input_hash: ownerImport.input_hash,
-                      confirm: true,
-                    });
-                    setOwnerImport({ ...ownerImport, status: result.status });
-                    setOwnerImportResult(`已导入 ${result.imported.length} 个专题；未调用模型。`);
-                    await reload();
-                  })
-                }
-              >
-                提交一次性导入
-              </button>
-            )}
-          </div>
-        )}
-        {ownerImportResult && <output>{ownerImportResult}</output>}
-      </section>
       <section className="home-section">
         <h3>导入来源</h3>
         <label>

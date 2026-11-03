@@ -17,7 +17,7 @@ trap cleanup EXIT
 trap 'exit 130' INT TERM
 
 if [ ! -f "$PWD/.env" ]; then
-  echo "缺少 .env。请配置 Neon DATABASE_URL 后再启动本地开发。" >&2
+  echo "缺少 .env。请按 .env.example 配置数据库与账号变量后再启动本地开发。" >&2
   exit 1
 fi
 
@@ -25,8 +25,8 @@ set -a
 source "$PWD/.env"
 set +a
 
-if [ -z "${DATABASE_URL_RUNTIME:-}" ] && [ -z "${DATABASE_URL:-}" ]; then
-  echo "缺少 DATABASE_URL 或 DATABASE_URL_RUNTIME。" >&2
+if [ -z "${DATABASE_URL_RUNTIME:-}" ]; then
+  echo "缺少 DATABASE_URL_RUNTIME。" >&2
   exit 1
 fi
 
