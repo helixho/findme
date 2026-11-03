@@ -61,12 +61,12 @@ export function SettingsPanel() {
       <p className="cloud-muted">
         兼容 OpenAI 接口的模型服务。设置保存在本实例的数据库中，随数据一起迁移。
       </p>
-      <label>
+      <label className="cloud-toggle">
         <input
           type="checkbox"
           checked={settings.enabled}
           onChange={(e) => set("enabled", e.target.checked)}
-        />{" "}
+        />
         启用模型调用
       </label>
       <label>
