@@ -6,7 +6,7 @@ FindMe is being built toward a cyber counterpart (赛博分身): a silicon-based
 
 Conversation, guided exploration, learning, feedback, and importing personal material are ways to build and revise that understanding. Reports and personal-development assessments make parts of it readable and usable. Users can start with a concrete experience or an easy question, without a large archive or a personality label. The future implementation form remains open; an agent plus a personality-distillation Skill is only one possible approach, not a committed architecture.
 
-The [first-stage scope](docs/delivery/phase-1-personal-understanding.md) is a usable foundation: a current personal understanding that can be read, discussed, corrected, and genuinely updated by new information in one persistent app. Existing Core and account-mode code provide substantial reusable parts, but code, local synthetic regression results, deployment, model quality, and personal usefulness have different validation states. See Current Status before treating a capability as available or the first stage as complete.
+The [first-stage scope](docs/delivery/phase-1-personal-understanding.md) is a usable foundation: a current personal understanding that can be read, discussed, corrected, and genuinely updated by new information in one persistent app. Existing Core and account-mode code provide substantial reusable parts, but code, local synthetic regression results, deployment, model quality, and personal usefulness have different validation states. See [As-Is](docs/as-is.md) before treating a capability as available or the first stage as complete.
 
 ## Repository map
 
@@ -15,9 +15,9 @@ This pnpm monorepo contains:
 - `apps/app/` — the sole React 19 + Vite browser SPA, shared by desktop and mobile H5
 - `apps/api/` — API and processing services
 - `packages/core/`, `packages/db/`, `packages/shared/` — domain logic, database schema, and shared contracts
-- `docs/` — product and architecture references, implementation contracts, command guidance, and execution records
+- `docs/` — product and architecture references, implementation contracts and command guidance
 
-The independent `apps/web` and `apps/miniapp` clients have retired from the repository under [ADR D25](docs/adr.md#d25-直接退役两个独立客户端统一使用-appsapp-浏览器入口). Internal App compatibility and legacy backend/data assets remain. This repository change has not been deployed and does not establish online retirement or first-stage acceptance. See [As-Is](docs/as-is.md) for the source-backed implementation boundary and Current Status for project progress.
+The independent `apps/web` and `apps/miniapp` clients have retired from the repository under [ADR D25](docs/adr.md#d25-直接退役两个独立客户端统一使用-appsapp-浏览器入口). Legacy runtime modes, Cloudflare/Neon paths and their tables have since been removed; the app runs as a single node. This does not establish first-stage acceptance. See [As-Is](docs/as-is.md) for the source-backed implementation boundary.
 
 ## Development entry points
 

@@ -247,4 +247,4 @@ A8 的结果既可重算又与原作答同源；A9 的 ContentClaim / FrameworkD
 
 按 [ADR D25](adr.md#d25-直接退役两个独立客户端统一使用-appsapp-浏览器入口)，`apps/app` 是唯一浏览器客户端，手机 H5 与桌面同代码；独立 `apps/web`、`apps/miniapp` 已从仓库退役，不等待全部旧功能迁入。App 内部 native/private/diagnostic-preview/dogfood 兼容分支保留，不新增独立真源。客户端退役不扩展为后端、数据库、迁移或用户数据清理，也不证明线上入口已切换。原生 Core 在同一账号数据库与 Profile scope 内运行；U2/dogfood 与私有 U3 只保留既有产物/兼容，不承接新入口；archive 是只读过渡，迁入核对后按 D23 退役。
 
-`wrangler.app.jsonc` 是 assets-only 前端，不需要 main；API 由 `wrangler.jsonc` 的 Worker 提供，App 的 VITE_CORE_API_BASE 必须指向相容 API 并验证 cookie/origin。入口部署、运行数据权威性与代码保留是三个维度，实际部署观察只在 Current Status，不从目录存在推断已上线。
+单节点应用同源提供 App 页面与 API；开发时 App 的 VITE_CORE_API_BASE 必须指向相容 API 并验证 cookie/origin。入口部署、运行数据权威性与代码保留是三个维度，不从目录存在推断已上线。

@@ -52,7 +52,7 @@ FrameworkService 和 FrameworkView 沿用现有协议实现，替换为 Postgres
 
 Node 与既有 Cloudflare Worker 都有显式 account 组合；Cloudflare 的独立身份/auth Hyperdrive、队列、R2 与 Secrets 需要后续配置。示例见 `deployment/`。现有 wrangler 配置未改，不会因提交启用账号模式或花费模型额度。
 
-已验证与未验证的范围只在执行记录维护：首个源码检查点见 C2–C4 执行记录，隔离环境的合成验证见 配置与最小验证，当前生产状态见 Current Status。
+可重复的验证入口见[测试计划](../delivery/phase-1-test-plan.md)；部署见[单节点部署](../../deployment/standalone/README.md)。
 
 官方实现参考：Better Auth PostgreSQL https://better-auth.com/docs/adapters/postgresql 、账号选项 https://better-auth.com/docs/reference/options 、PostgreSQL RLS https://www.postgresql.org/docs/17/ddl-rowsecurity.html 、R2 Workers API https://developers.cloudflare.com/r2/api/workers/workers-api-reference/ 。这些参考不证明本仓库实现已经运行通过。
 

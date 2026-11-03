@@ -73,6 +73,47 @@ it("stores framework answers, specialist wording and originals as personal sourc
       "最近一次改变看法是在复盘之后。",
     );
 
+    // Capture time is not event time: unknown stays unknown.
+    const [answerAssessment] = await admin.sql`
+      select s.occurred_at, a.temporal_precision, s.author_kind from source_items s
+      join source_assessments a on a.source_item_id = s.id where s.id=${answerId}`;
+    expect(answerAssessment).toMatchObject({
+      occurred_at: null,
+      temporal_precision: "unknown",
+      author_kind: "subject",
+    });
+
+    // Correcting an answer adds a new source that supersedes the old one; excluding stops use.
+    const correctedId = randomUUID();
+    await repository.update((state) => {
+      const run = state.runs[0]!;
+      const old = run.answers[0]!;
+      old.status = "corrected";
+      run.answers.push({
+        ...old,
+        id: correctedId,
+        text: "改变看法其实是在和同事争论之后。",
+        hash: digest("改变看法其实是在和同事争论之后。"),
+        status: "valid",
+        replaces: old.id,
+      });
+    });
+    const statuses = await admin.sql`
+      select id, usage_status from source_items where id in (${answerId}, ${correctedId})`;
+    expect(Object.fromEntries(statuses.map((r) => [r.id, r.usage_status]))).toEqual({
+      [answerId]: "superseded",
+      [correctedId]: "active",
+    });
+    const [link] = await admin.sql`
+      select relation from source_links where source_item_id=${correctedId} and target_source_item_id=${answerId}`;
+    expect(link?.relation).toBe("corrects");
+    await repository.update((state) => {
+      state.runs[0]!.answers[1]!.status = "excluded";
+    });
+    const [excluded] =
+      await admin.sql`select usage_status from source_items where id=${correctedId}`;
+    expect(excluded?.usage_status).toBe("excluded");
+
     // Specialist wording: the session row has no text; an update supersedes the previous source.
     const created = await withProfileTransaction(runtime.db, ctx, (tx) =>
       createSession(
@@ -121,6 +162,10 @@ it("stores framework answers, specialist wording and originals as personal sourc
     expect(await files.declare(ctx, declaration)).toEqual(first);
     const [original] = await sources("original_file");
     expect(original?.id).toBe(first.source_id);
+    // Uploaded by the person does not mean written by the person.
+    const [author] =
+      await admin.sql`select author_kind from source_items where id=${first.source_id}`;
+    expect(author?.author_kind).toBe("unknown");
     const [blob] = await admin.sql`select source_item_id from source_blobs where id=${first.id}`;
     expect(blob?.source_item_id).toBe(first.source_id);
   } finally {

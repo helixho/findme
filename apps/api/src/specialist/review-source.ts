@@ -21,7 +21,8 @@ export async function recordReviewSource(
       sourceKind: "action_trial_review",
       authorKind: "subject",
       content: selfReportText,
-      occurredAt: now,
+      // The review is captured now; when the trial was carried out is not stated.
+      occurredAt: null,
       externalRef: `action-trial-review:${trial.id}:v${reviewVersion}`,
       sourceMeta: {
         record_kind: "action_trial_review",
@@ -29,6 +30,7 @@ export async function recordReviewSource(
         trial_id: trial.id,
         prior_trial_version: trial.version,
         review_version: reviewVersion,
+        reviewed_at: now.toISOString(),
         proposal_id: trial.proposalId,
         related_claim_revision_id: relatedClaimId,
         topic_linkage: "pending_user_selection",
@@ -41,7 +43,7 @@ export async function recordReviewSource(
     version: 1,
     attributionStatus: "confirmed_subject",
     contextCompleteness: body.observation ? "sufficient" : "partial",
-    temporalPrecision: "exact",
+    temporalPrecision: "unknown",
     eligibility: "needs_review",
     rationale:
       "本人提交的 ActionTrial 回顾结构化记录；未执行与作用未知按原值保留，尚未关联专题或形成认识。",

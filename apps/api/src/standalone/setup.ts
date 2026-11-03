@@ -5,6 +5,17 @@ import { ACCOUNT_ISSUER, createAccountAuth, createOwnerLogin } from "../auth/ser
 import { accountOptions } from "../cloud-diagnostic/config.js";
 
 const env = process.env;
+
+/** Table and column names defined by schema.sql (pg_dump format: one column per indented line). */
+function expectedColumns(schema: string) {
+  const columns = new Set<string>();
+  for (const [, table, body] of schema.matchAll(/CREATE TABLE public\.(\w+) \(\n([\s\S]*?)\n\);/g))
+    for (const line of (body ?? "").split("\n")) {
+      const name = line.match(/^ {4}("?)(\w+)\1 /)?.[2];
+      if (name && name !== "CONSTRAINT") columns.add(`${table}.${name}`);
+    }
+  return columns;
+}
 function required(key: string) {
   const value = env[key];
   if (!value) throw new Error(`${key}_REQUIRED`);
@@ -13,9 +24,22 @@ function required(key: string) {
 if (!env.DATABASE_URL_ADMIN) throw new Error("DATABASE_URL_ADMIN_REQUIRED");
 const admin = createDb(env.DATABASE_URL_ADMIN, { max: 1 });
 try {
-  // The structure is created once on an empty database; an existing database is left as it is.
+  // The structure is created once on an empty database. An existing database is never changed
+  // here; if it lacks anything schema.sql defines, stop instead of running against it.
+  const schema = await readFile("packages/db/schema.sql", "utf8");
   const [structure] = await admin.sql`select to_regclass('public.tenants') is not null as ready`;
-  if (!structure?.ready) await admin.sql.unsafe(await readFile("packages/db/schema.sql", "utf8"));
+  if (!structure?.ready) await admin.sql.unsafe(schema);
+  else {
+    const actual = await admin.sql<{ name: string }[]>`
+      select table_name || '.' || column_name as name from information_schema.columns
+      where table_schema = 'public'`;
+    const present = new Set(actual.map((row) => row.name));
+    const missing = [...expectedColumns(schema)].filter((name) => !present.has(name));
+    if (missing.length)
+      throw new Error(
+        `DATABASE_STRUCTURE_MISMATCH: this version does not convert existing databases; missing ${missing.slice(0, 10).join(", ")}${missing.length > 10 ? " …" : ""}. Deploy on an empty database (deployment/standalone/README.md, 数据库结构).`,
+      );
+  }
   await admin.sql.unsafe(await readFile("packages/db/access/account-runtime.sql", "utf8"));
   for (const role of ["runtime", "identity", "auth"]) {
     const password = env[`DB_${role.toUpperCase()}_PASSWORD`];

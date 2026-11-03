@@ -1,6 +1,6 @@
 # 第一阶段主链：当前理解进入下一次交流
 
-> 本文是[交付计划](diagnostic-product-plan.md)工作包 2 的产品侧差异设计，以及工作包 4 首条主链的实现契约。依据为[第一阶段范围](../delivery/phase-1-personal-understanding.md)与 [ADR D26](../adr.md#d26-对话使用-core-当前认识并自动处理新输入)。实际实现、验证与未完成项见执行记录，不在此保存测试数字或部署状态。工作包 2 的运行侧资源核对（数据库、推理出口、凭据）本轮未做，按本人决定后置。
+> 本文是[交付计划](diagnostic-product-plan.md)工作包 2 的产品侧差异设计，以及工作包 4 首条主链的实现契约。依据为[第一阶段范围](../delivery/phase-1-personal-understanding.md)与 [ADR D26](../adr.md#d26-对话使用-core-当前认识并自动处理新输入)。实际实现见 [As-Is](../as-is.md)，不在此保存测试数字或部署状态。
 
 ## 1. 要解决的断点
 

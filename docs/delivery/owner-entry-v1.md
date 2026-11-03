@@ -1,5 +1,7 @@
 # owner-entry-v1 — 本人内测入口范围与验收条件
 
+> 本文是历史核对记录：文中提到的执行记录、Current Status、Runbook、迁移方案与 `deployment/README.md` 不在公开仓库中，当前运行方式见 [As-Is](../as-is.md) 与[单节点部署](../../deployment/standalone/README.md)。
+
 > **历史范围说明（2026-10-30）：** 当前产品阶段采用[第一阶段范围与验收](phase-1-personal-understanding.md)。本文保留 2026-10-22 的原范围、10 条 AC 与 G1 记录，供追溯和复用；“本轮”均指当时交付。原生产 Neon 恢复路径已暂停，不能按本文继续执行。新范围中的持续对话、新来源到认识和知识辅助不继承旧 G1 通过状态。
 
 > **状态：G1 需求基线已接收（2026-10-22）。** 本文是 `owner-entry-v1` 的 ART-SCOPE 与 ART-SYSREQ；本人已确认范围，本次 G1 评审由受委托的主 Agent 组织并作出决定，见 G1 评审记录。G1 通过不表示任一 AC 已验证，也不授权实施、生产迁移或发布。产品目标见 [Overview](../overview.md)，业务规则见 [BA](../ba.md)，唯一运行真源与过渡边界见 [ADR D23](../adr.md#d23-账号模式云端数据库为唯一运行真源其余运行路径冻结或退役)，实际进度见 Current Status。

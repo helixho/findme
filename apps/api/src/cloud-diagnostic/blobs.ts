@@ -68,7 +68,8 @@ export class CloudBlobService {
           tenantId: ctx.tenantId,
           subjectId: ctx.subjectId,
           sourceKind: "original_file",
-          authorKind: "subject",
+          // Uploaded by the person; who wrote the file is not known from the upload.
+          authorKind: "unknown",
           content: "",
           externalRef: `original-file:${input.content_sha256}`,
           sourceMeta: {
@@ -76,6 +77,7 @@ export class CloudBlobService {
             media_type: input.media_type,
             byte_length: input.byte_length,
             content_sha256: input.content_sha256,
+            uploaded_by: "subject",
             text_extracted: false,
           },
         })

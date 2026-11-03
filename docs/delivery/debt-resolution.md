@@ -1,5 +1,7 @@
 # 工程与文档债务逐项核对
 
+> 本文是历史核对记录：文中提到的执行记录、Current Status、Runbook、迁移方案与 `deployment/README.md` 不在公开仓库中，当前运行方式见 [As-Is](../as-is.md) 与[单节点部署](../../deployment/standalone/README.md)。
+
 原修复基线：`4a1df98`；后续修复为 `bff6128`，结构/清理为 `165f6d2`；本次依赖续做和最终状态以维护收尾记录§7为准（2026-10-31）。原始审计来源为 `deliverables/engineering-assurance/raw/code.md`、`arch.md`、`test.md`、`doc.md` 及 `deliverables/engineering-assurance/tech-debt-findme-2026-10-31.md`；这些未跟踪交付物只作来源定位，不作为文档链接或本轮改写对象。保留原始全部 ID（含 AD-06b、AD-10b 和表外 TD-14）；事项列标题中的数字仅为原审计表述，不是当前测量。原总分、工期与季度计划不作为验收依据。
 
 首批和后续事实分别见首批记录、后续记录；本轮结构、依赖与清理结果见维护收尾记录。本次按实际修复和最终完整回归更新维护项，不继承较早候选的验证。版本扫描仍有提示，其补丁/实际API适用性逐项说明，不冒充扫描清零。测试数字只在执行记录保留。

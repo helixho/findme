@@ -1,5 +1,7 @@
 # FindMe — 交付裁剪与制品适用性矩阵
 
+> 本文是历史核对记录：文中提到的执行记录、Current Status、Runbook、迁移方案与 `deployment/README.md` 不在公开仓库中，当前运行方式见 [As-Is](as-is.md) 与[单节点部署](../deployment/standalone/README.md)。
+
 > **状态：已确认（2026-10-22）。** 本人确认 43 行处理方式、`owner-entry-v1` 范围、仓库文件任务主权及新文件位置；ART-NFR 在 G1 先写最小定义与验证方向，G2 补详细度量。按 Helix Delivery Kit（`helix-delivery-kit` 仓库，v0.2-draft）的 P01 来源核实与范围澄清及项目裁剪说明编制，对应制品 ART-GOVERNANCE。矩阵确认不等于各制品内容或任何阶段门已经批准；“现状”只说明位置和缺口。Kit 本身仍是候选方法。
 
 **2026-10-30 范围更新。** 沿用已确认的单人角色、文档职责和 43 类制品裁剪；当前范围改由[第一阶段个人理解与对话](delivery/phase-1-personal-understanding.md)承接。旧 owner-entry-v1 的 G1 与专属文件仍作历史证据；新需求不继承旧通过状态。下表更新当前引用与实际验证边界，不新增一套审批或平行制品体系。

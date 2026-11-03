@@ -15,6 +15,7 @@ export async function recordPersonalSource(
     content: string;
     externalRef: string;
     meta: Record<string, unknown>;
+    /** When the described event happened; unknown unless the input states it. Capture time is created_at. */
     occurredAt?: Date;
     rationale: string;
     complete?: boolean;
@@ -31,7 +32,7 @@ export async function recordPersonalSource(
       sourceKind: input.kind,
       authorKind: "subject",
       content: input.content,
-      occurredAt: input.occurredAt ?? new Date(),
+      occurredAt: input.occurredAt ?? null,
       externalRef: input.externalRef,
       sourceMeta: input.meta,
     })
@@ -42,7 +43,7 @@ export async function recordPersonalSource(
     version: 1,
     attributionStatus: "confirmed_subject",
     contextCompleteness: input.complete === false ? "partial" : "sufficient",
-    temporalPrecision: "exact",
+    temporalPrecision: input.occurredAt ? "exact" : "unknown",
     eligibility: "needs_review",
     rationale: input.rationale,
   });

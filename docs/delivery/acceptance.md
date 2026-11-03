@@ -2,18 +2,18 @@
 
 有效依据为 [P1-AC-01–09](phase-1-personal-understanding.md)，旧 owner-entry-v1 的十条 AC 与 G1 不转为本阶段通过。本文保留未执行状态，Agent 不代写本人体验。工程检查、部署运行、真实回答质量与本人效用分别记录。
 
-候选版本：未固定。实际入口与运行依赖：未核验。本人接受日期与结论：未执行。工程证据入口：后续维护及远端 CI 记录；工程候选不等于业务接受候选，所有条件继续保持未执行。执行顺序见[交付计划](../implementation/diagnostic-product-plan.md#3-下一阶段的具体工作包与依赖)。
+三类证据分开记录：工程证据是可重复的合成测试，只说明代码行为；模型证据需要真实模型运行，当前模型调用关闭，全部未执行；本人证据只能由本人提供。没有本人反馈的条件一律保持未接受。
 
-| 条件 | 本轮业务接受状态 | 需要的实际证据 |
-| --- | --- | --- |
-| P1-AC-01 | 未执行 | 同入口输入，刷新、重进及另一端的版本/处理状态往返 |
-| P1-AC-02 | 未执行 | 声明集合的重要内容去向、总览/专题、精确来源、未知 |
-| P1-AC-03 | 未执行 | 零历史起步、有历史的相关回应、换题/结束 |
-| P1-AC-04 | 未执行 | 新输入的处理结果，以及下一次相关回答和视图的变化 |
-| P1-AC-05 | 未执行 | 纠正后的依据/判断/建议、再次提问、旧回包与无关判断 |
-| P1-AC-06 | 未执行 | 开导、质疑、过度自责与模型误读的真实案例和反驳处理 |
-| P1-AC-07 | 未执行 | 来源化方法辅助、个人反馈进入认识及后续使用 |
-| P1-AC-08 | 未执行 | 真实支持格式的预览、选择、导入、重复核对与超限去向 |
-| P1-AC-09 | 未执行 | 本人阅读/对话→输入/纠正→更新→再次交流及本人价值反馈 |
+| 条件 | 工程证据（合成） | 模型证据 | 本人证据 | 状态 |
+| --- | --- | --- | --- | --- |
+| P1-AC-01 | `e2e/real.spec.ts`（真实账号刷新后保存仍在）、`scripts/verify-standalone.mjs`（部署后读写与重启保留） | 未执行 | 未执行 | 未接受 |
+| P1-AC-02 | `cloud-account-integration.test.ts`（报告与依据读取）；全量材料的去向未贯通 | 未执行 | 未执行 | 未接受 |
+| P1-AC-03 | `core-reliability.test.ts`、`core-prior-understanding-postgres.test.ts` | 未执行 | 未执行 | 未接受 |
+| P1-AC-04 | `core-prior-understanding-postgres.test.ts`、`account-core-model-postgres.test.ts`；诊断报告与知识专题不随对话更新，见 [As-Is §15](../as-is.md#15-三条理解路径的现状关系) | 未执行 | 未执行 | 未接受 |
+| P1-AC-05 | `core-reliability.test.ts`、`cloud-account-integration.test.ts`（来源生命周期）、`personal-sources-postgres.test.ts`（更正替代与排除） | 未执行 | 未执行 | 未接受 |
+| P1-AC-06 | 无（需要真实回答） | 未执行 | 未执行 | 未接受 |
+| P1-AC-07 | `knowledge-processing-postgres.test.ts`、`specialist-postgres.test.ts`、`specialist-trial-review.test.ts` | 未执行 | 未执行 | 未接受 |
+| P1-AC-08 | `export-restore-continuity.test.ts`、`standalone-files.test.ts`、`personal-sources-postgres.test.ts`（原档来源） | 未执行 | 未执行 | 未接受 |
+| P1-AC-09 | 无（需要本人完整使用） | 未执行 | 未执行 | 未接受 |
 
-实际执行时在 `docs/execution/` 记录候选提交、运行入口、相关版本/来源标识、操作与观察、失败/未测项和本人原意的反馈，再由本文链接。不得把私人正文放入仓库。未通过则保留具体问题，不用“有页面”或合成回归代替接受；不新增一套单人审批流程。
+各条件需要的实际证据见[第一阶段范围](phase-1-personal-understanding.md)。实际执行时记录候选提交、运行入口、相关版本/来源标识、操作与观察、失败/未测项和本人原意的反馈；私人正文不放入仓库。未通过则保留具体问题，不用“有页面”或合成回归代替接受。

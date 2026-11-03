@@ -1,6 +1,6 @@
 # 设计事实与参考
 
-产品定位与需求以 [Overview](../docs/overview.md)、[BA](../docs/ba.md) 为准；阶段范围以 [第一阶段](../docs/delivery/phase-1-personal-understanding.md) 为准。实现状态以 Current Status、[As-Is](../docs/as-is.md) 及源码为准。设计原型表达目标体验，不证明功能已运行或上线。
+产品定位与需求以 [Overview](../docs/overview.md)、[BA](../docs/ba.md) 为准；阶段范围以 [第一阶段](../docs/delivery/phase-1-personal-understanding.md) 为准。实现状态以 [As-Is](../docs/as-is.md) 及源码为准。设计原型表达目标体验，不证明功能已运行或上线。
 
 ## 当前设计输入（2026-10-30）
 
