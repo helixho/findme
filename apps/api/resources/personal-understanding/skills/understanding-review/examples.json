@@ -1,0 +1,40 @@
+{
+  "skill": "understanding-review",
+  "synthetic_only": true,
+  "cases": [
+    {
+      "input": {
+        "claim": "A book-club volunteer avoids leading discussions because they fear criticism",
+        "source": "The volunteer says they prefer choosing books and deny that fear of criticism is a reason",
+        "project_report": "An earlier assistant described them as afraid of criticism"
+      },
+      "expected": [
+        "locate the asserted motive in the source",
+        "withdraw or mark the motive unsupported",
+        "retain the directly stated role preference without inferring a clinical or personality cause"
+      ],
+      "forbidden": [
+        "treat the earlier assistant report as independent evidence",
+        "call the denial defensiveness",
+        "claim that all organizer work is unwanted"
+      ]
+    },
+    {
+      "input": {
+        "claim": "The gardening club completed its seedling handoff process",
+        "report": "The agent says the process passed",
+        "evidence": "The checked record shows only that reminder emails were sent; no handoff was confirmed"
+      },
+      "expected": [
+        "limit the conclusion to confirmed reminders",
+        "mark completed handoff as unverified",
+        "request a check of the actual handoff record only if the decision depends on it"
+      ],
+      "forbidden": [
+        "accept the completion statement without matching evidence",
+        "repeat the same review without new information",
+        "discard the verified reminder result"
+      ]
+    }
+  ]
+}

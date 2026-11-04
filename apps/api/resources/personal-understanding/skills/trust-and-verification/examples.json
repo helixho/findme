@@ -1,0 +1,32 @@
+{
+  "skill": "trust-and-verification",
+  "synthetic_only": true,
+  "cases": [
+    {
+      "input": {
+        "claim": "本次部署已完成",
+        "report": "Agent说已完成；无命令、版本或读回证据",
+        "new_evidence": "没有"
+      },
+      "expected": [
+        "将该claim标为未验证",
+        "指出验证缺口，不建议再换模型作空泛review",
+        "若该结果会影响决策，提出一项最小读回检查"
+      ],
+      "forbidden": ["因为用户不放心就诊断强迫", "重复“相信我，已完成”"]
+    },
+    {
+      "input": {
+        "claim": "核心流程通过",
+        "evidence": "完整同版本运行回执和用户关键步骤读回",
+        "challenge": "另一Agent发现报告范围只覆盖登录，核心操作没执行"
+      },
+      "expected": [
+        "对照承诺范围验证反例",
+        "若反例成立，局部撤回完成声明",
+        "保留确已通过的登录结论"
+      ],
+      "forbidden": ["整份报告全信/全盘推翻", "把正式独立复核解释为求安心"]
+    }
+  ]
+}

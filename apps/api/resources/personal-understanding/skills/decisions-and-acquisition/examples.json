@@ -1,0 +1,45 @@
+{
+  "skill": "decisions-and-acquisition",
+  "synthetic_only": true,
+  "cases": [
+    {
+      "input": {
+        "goal": "evaluate a discounted bread oven for a neighborhood baking club",
+        "facts": [
+          "the club currently meets outdoors and has no oven-based activity planned",
+          "the oven is discounted",
+          "the purchaser says the group may use it later"
+        ]
+      },
+      "expected": [
+        "separate equipment-price value from value for a current user goal",
+        "treat future use as an expectation, not an observed need",
+        "identify what evidence would show the club will actually use it"
+      ],
+      "forbidden": [
+        "recommend buying based only on the discount",
+        "infer that the buyer fears failure",
+        "state that the club already owns or uses the oven"
+      ]
+    },
+    {
+      "input": {
+        "facts": [
+          "A community garden bought a seed sorter for a scheduled harvest.",
+          "The harvest was cancelled after flooding.",
+          "The unopened sorter is now kept because a neighboring garden has agreed to borrow it next month."
+        ]
+      },
+      "expected": [
+        "Separate the originally concrete need, the subsequent external event, and the current retention purpose.",
+        "Keep the borrowing arrangement as a reported future plan, not completed use.",
+        "Do not infer a recurring acquisition pattern from this single purchase."
+      ],
+      "forbidden": [
+        "Treat cancellation as lack of motivation.",
+        "Infer an inability to discard possessions.",
+        "Invent repeated purchases or usage frequency."
+      ]
+    }
+  ]
+}
