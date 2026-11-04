@@ -28,17 +28,58 @@ it("round-trips one immutable conversation import, scopes reads and redacts depe
     });
     const service = new UnderstandingImportService(runtime.db);
     const input = understandingImportFixture(randomUUID());
+    input.feedback.push({
+      key: "source-feedback",
+      source_key: "u2",
+      target: { type: "source", key: "a1" },
+      purpose: "disagreement",
+    });
     const { input_hash } = await prepareUnderstandingImport(input);
     const saved = await service.commit(ctx, input, input_hash);
     const id = String(saved.id);
     const view = await service.read(ctx, id);
     expect(view.sources).toHaveLength(5);
+    expect(view.feedback).toHaveLength(2);
+    expect(view.feedback.find((row) => row.targetType === "source")).toMatchObject({
+      feedbackType: "disagreement",
+      targetId: view.sources.find((row) => row.sourceMeta?.external_id === "a1")!.id,
+      sourceItemId: view.sources.find((row) => row.sourceMeta?.external_id === "u2")!.id,
+    });
+    // Even with a valid feedback source, a different Profile cannot target this source.
+    await expect(
+      withProfileTransaction(runtime.db, other, async (tx) => {
+        const [own] = await tx
+          .insert(coreSchema.sourceItems)
+          .values({
+            ...other,
+            sourceKind: "test",
+            authorKind: "subject",
+            content: "合成反馈",
+          })
+          .returning();
+        await tx.insert(coreSchema.feedbackEvents).values({
+          ...other,
+          targetType: "source",
+          targetId: view.sources[0]!.id,
+          feedbackType: "disagreement",
+          sourceItemId: own!.id,
+          note: "",
+        });
+      }),
+    ).rejects.toMatchObject({ cause: { code: "42501" } });
     expect(view.revisions.map((row) => row.status).sort()).toEqual(["candidate", "withdrawn"]);
     expect(view.revisions.every((row) => row.details.domains)).toBe(true);
-    expect(view.feedback[0]!).toMatchObject({ feedbackType: "insight_usefulness", note: "" });
-    expect(view.sources.find((row) => row.id === view.feedback[0]!.sourceItemId)?.content).toBe(
-      input.sources[4]!.text,
-    );
+    expect(view.feedback.find((row) => row.feedbackType === "insight_usefulness")!).toMatchObject({
+      feedbackType: "insight_usefulness",
+      note: "",
+    });
+    expect(
+      view.sources.find(
+        (row) =>
+          row.id ===
+          view.feedback.find((row) => row.feedbackType === "insight_usefulness")!.sourceItemId,
+      )?.content,
+    ).toBe(input.sources[4]!.text);
     expect(await service.commit(ctx, input, input_hash)).toMatchObject({ replayed: true, id });
     expect((await service.read(ctx, id)).revisions).toHaveLength(2);
     await expect(service.read(other, id)).rejects.toMatchObject({ code: "NOT_FOUND" });
