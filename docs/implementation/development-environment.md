@@ -12,6 +12,10 @@ pnpm install --frozen-lockfile
 
 在 Codex Cloud 开发时，环境须通过用户的 GitHub 连接获得私仓访问权，并按[官方 Cloud 环境文档](https://learn.chatgpt.com/docs/environments/cloud-environments)配置依赖；本机 Git 认证不会自动继承。环境保存状态不替代 Git 提交和推送，开始前先核对检出提交与 GitHub main 一致。
 
+## 应用直接运行的目标方式
+
+应用开发及后续部署直接运行源码或构建产物，不以 Docker 应用镜像作为前置；数据库容器和 CI 合成数据库测试独立保留。目标运行边界见 [TA](../ta.md)，运行脚本、进程管理和现有实例切换作为 [AG-06](../delivery/agent-work-plan.md)实施，未完成前不将容器部署命令改称直接运行命令。无需为纯文档或方法初稿启动本机 Docker。
+
 ## 无生产连接的开发与预览
 
 默认不注入生产数据库、访问串或模型 key。主 App 明确使用同源 API 地址，避免默认连现用生产域名：

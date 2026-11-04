@@ -125,6 +125,10 @@ Insight Analysis Profile 是 Epistemic Policy / GenerationRecord 的一种受校
 
 Life Structure 不预置“健康/事业/家庭”等固定人生清单；它描述当前生活实际由哪些目标、角色、关系、约束、贡献/创造、恢复、节奏等机制支撑。某机制缺位只有在当前问题中有依据和解释价值时才形成 gap，未采集到不能等同于用户缺陷。
 
+方法 Skill 是版本化的方法资产：引用来源、适用条件、操作步骤、产物规则与反例；不是个人 Claim，也不代替 FrameworkDefinitionVersion 或计分规则。方法蒸馏保留参考来源和采用/改写边界，不把满意样例中的私人结论转为通用规则。
+
+Agent 运行记录按 GenerationRecord/现有任务元数据扩展，关联实际使用的 context、skill/reference、tool contract、harness、policy、model 与 validator 版本及来源/修订指纹。版本须可还原实际内容；不把每个版本名新增成独立领域表。会话和压缩摘要属于派生执行状态，不能重复计证；来源失效及删除传播同样覆盖其中的私人派生文字，恢复不能绕过资格复核。
+
 ### 3.5 诊断运行与报告版本
 
 报告呈现特定时点、问题和范围下的综合理解；报告生成完毕不等于赛博分身已经形成，用户也无需每次生成报告才使用个人理解。

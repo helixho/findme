@@ -4,9 +4,9 @@
 
 ## 1. 保留基础与技术取舍
 
-赛博分身是产品愿景，持续理解、可用的支持与建议、诚实挑战、知识引导及纠正后真实更新是技术需要满足的结果。Agent、人格蒸馏 Skill、微调或其他未来形式尚未选定；不将它们写成需求、既定架构或第一阶段前置。后续具体方案按当时可用能力、效果、成本与实际缺口选择，现有实现不自动成为长期技术承诺。
+赛博分身是产品愿景，持续理解、可用的支持与建议、诚实挑战、知识引导及纠正后真实更新是技术需要满足的结果。第一阶段选择带 harness 的个人理解 Agent，方法论与质量标准以 skills 执行；具体职责见 [AA](aa.md) 与 [Agent 设计](implementation/personal-understanding-agent.md)。此方法蒸馏不等于人格蒸馏、微调或完整分身；这些未来形式尚未选定。后续具体方案按当时可用能力、效果、成本与实际缺口选择，现有实现不自动成为长期技术承诺。
 
-沿用现有 monorepo、TypeScript、React 19 + Vite 浏览器客户端、Hono API、Drizzle/PostgreSQL 与 M-X2 模型出口。运行方式是单节点：一个 Node 进程提供网页、API 与进程内执行器，PostgreSQL 默认为同节点容器，也可在启动配置中改为外部数据库；部署见[单节点部署](../deployment/standalone/README.md)。这里只说明拟复用的技术基础，不重复运行资源 ID、服务状态、模型版本或实时限额。
+沿用现有 monorepo、TypeScript、React 19 + Vite 浏览器客户端、Hono API 与 Drizzle/PostgreSQL。个人理解任务通过 pi SDK 承载的 Agent 执行，既有模型适配按具体步骤复用；不另建 Agent 服务集群。运行方式保持单节点：应用直接运行源码或构建产物，由进程管理负责启动、停止、重启与就绪检查。应用 Docker 打包延后到确有分发需求时，不作为开发、CI 或功能验证前置；PostgreSQL 容器与应用打包独立，既有数据库无需因此迁移。现有容器脚本见[单节点部署](../deployment/standalone/README.md)，在直接运行路径完成并验证前保留，不把设计当作已切换。这里只说明拟复用的技术基础，不重复运行资源 ID、服务状态、模型版本或实时限额。
 
 正式产品默认是账号制云端服务，手机与电脑消费同一 Core API、对话、个人理解、证据和诊断状态。唯一客户端为 `apps/app` 浏览器单页应用（SPA），手机 H5 与桌面同代码，不是原生安装包。独立 `apps/web`、`apps/miniapp` 及 Taro 工具链按 [ADR D25](adr.md#d25-直接退役两个独立客户端统一使用-appsapp-浏览器入口) 退役，不以迁移全部旧功能为前置；App 自身 native/private/diagnostic-preview/dogfood 兼容分支保留。Android/Capacitor 包装工程与 APK 构建链已退役。AV/Codex CLI/本机查看器仅为可选采集和研究工具，不要求普通用户安装、登录开发工具或保持电脑在线。
 
@@ -106,11 +106,11 @@
 
 处理开始与发布前复核使用范围和输入版本。生成耗时期间发生纠正、排除或删除时，旧结果不能未经检查重新发布为当前。更新认识版本、标记被替代版本和安排视图失效应有可验证的一致性方案。
 
-第一阶段继续复用 M-X2 作为统一 LLM 出口；业务模块不直接调用 Provider，客户端不拼私人人格 prompt。模型选择和上下文装配在对应方案中按当时能力确定，不能把某个当前 provider 固化为赛博分身的定义。采用结构校验、引用校验、语义质量检查及可降级输出；模型自评 confidence 只作元数据。结构化测评的确定性分数独立于模型输出；角色、规则、内容和 prompt 的版本必须能还原实际使用内容，不能仅有一个无法解析的版本字符串。
+第一阶段业务模块向 Agent 提交任务，不直接向 LLM 提交完整理解流程；Agent 通过可替换模型适配调用 Provider，客户端不拼私人人格 prompt。pi SDK 采用应用自有上下文、资源加载器和领域工具，关闭默认编码工作区资源的继承；具体版本和运行契约见[Agent 设计](implementation/personal-understanding-agent.md)。模型选择和上下文装配在对应方案中按当时能力确定，不能把某个当前 provider 固化为赛博分身的定义。采用结构校验、引用校验、语义质量检查及可降级输出；模型自评 confidence 只作元数据。结构化测评的确定性分数独立于模型输出；角色、规则、内容和 prompt 的版本必须能还原实际使用内容，不能仅有一个无法解析的版本字符串。
 
 ### 认识推理分级与决策血缘
 
-探索和认识生成采用三段式执行：**Deterministic Gate → Semantic Planner / Synthesizer → Deterministic Validator**。Gate 先执行租户、来源用途资格、版本、question lifecycle、预算/hard cap、幂等与已知重复等可确定条件；M-X2 只比较候选解释、识别关键 uncertainty、生成有限 scope 与自然语言；Validator 再检查结构、evidence 引用、scope、重复、stale version、Ask/Stop/发布前置条件。任何一层失败都不能把模型候选直接升级为当前认识。
+探索和认识生成采用三段式执行：**Deterministic Gate → Semantic Planner / Synthesizer → Deterministic Validator**。Gate 先执行租户、来源用途资格、版本、question lifecycle、预算/hard cap、幂等与已知重复等可确定条件；Agent 在这些边界内调用工具和模型比较候选解释、识别关键 uncertainty、生成有限 scope 与自然语言；Validator 再检查结构、evidence 引用、scope、重复、stale version、Ask/Stop/发布前置条件。任何一层失败都不能把模型候选直接升级为当前认识。
 
 该分工用于当前工程的可核验执行，普通对话按回应意图使用相应检查，不要求每轮经过完整诊断或主动补问。未来替换模型或执行方式时，需要保持来源忠实、独立判断、修订传播和可恢复等结果要求，不要求沿用同一技术形式。
 
@@ -144,7 +144,7 @@ Epistemic Policy 应使用可解析版本，并和 prompt/model/validator 分开
 
 ### 三观与角色对照的实现约束
 
-复用现有应用、内容发布和 M-X2：角色资产作为受版本管理的声明式内容装配，按同一输入情境分别调用，不要求增加独立服务、Agent 网络、知识库 runtime 或图数据库。角色输入不授予任意工具执行权限，也不能覆盖来源/租户/输出契约。
+复用现有应用、内容发布和 Agent 内的模型适配：角色资产作为受版本管理的声明式内容装配，按同一输入情境分别调用，不要求增加独立服务、Agent 网络、知识库 runtime 或图数据库。角色输入不授予任意工具执行权限，也不能覆盖来源/租户/输出契约。
 
 对照的缓存与任务键包含租户、输入材料及版本指纹、角色发布版本和处理版本；纠正或来源撤回必须使旧结果可识别为过期。共用角色定义不等于共用私人上下文。允许少量角色、选择性检索、按需生成和局部失败，调用数量/延迟预算由后续验证决定。
 
@@ -160,7 +160,7 @@ Epistemic Policy 应使用可解析版本，并和 prompt/model/validator 分开
 
 离线工具只服务可选历史输入和开发研究。普通用户应能在线完成主流程，不能由用户承担脚本、目录同步和人工 schema 映射。各 adapter 的错误不传播成原生功能不可用。
 
-存储职责和云端多端边界沿用已确认设计；具体资源、模型与可选适配在交付时核对，文档更新不恢复停用服务。先以[第一阶段范围](delivery/phase-1-personal-understanding.md)贯通可用的个人理解与对话；[既有产品代码计划](implementation/diagnostic-product-plan.md)提供可复用切片，当前优先级由 [Roadmap](roadmap.md) 管理。更复杂的分身表达、模型适配或代理形态，待相应需求进入方案阶段后评估当时技术，不预先指定蒸馏、Skill 或微调路线。
+存储职责和云端多端边界沿用已确认设计；具体资源、模型与可选适配在交付时核对，文档更新不恢复停用服务。当前 Agent 与方法 skills 的实现按[工作计划](delivery/agent-work-plan.md)推进；方法资产、运行框架和模型彼此可替换。先以[第一阶段范围](delivery/phase-1-personal-understanding.md)贯通可用的个人理解与对话；[既有产品代码计划](implementation/diagnostic-product-plan.md)提供可复用切片，当前优先级由 [Roadmap](roadmap.md) 管理。更复杂的分身表达、模型适配或代理形态，待相应需求进入方案阶段后评估当时技术，不据当前方法 skills 的选择预先指定人格蒸馏或微调路线。
 
 ## 7. 技术依据
 
