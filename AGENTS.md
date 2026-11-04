@@ -5,18 +5,18 @@
 | 文档 | 用途与边界 |
 | --- | --- |
 | [Overview](docs/overview.md) | 产品定位、需求边界；不列功能完成情况 |
-| [第一阶段范围与验收](docs/delivery/phase-1-personal-understanding.md) | 当前产品阶段的结果、必需需求与验收；不等同 Delivery Kit 的 S1，也不表示已形成完整赛博分身 |
+| [第一阶段范围与验收](docs/delivery/phase-1-personal-understanding.md) | 当前产品阶段的结果、必需需求与验收；不表示已形成完整赛博分身 |
 | [BA](docs/ba.md) | 业务规则、业务过程与业务验收条件 |
 | [AA](docs/aa.md) | 应用职责、功能协作与逻辑契约 |
 | [DA](docs/da.md) | 领域语义、来源、证据、修订与数据生命周期 |
 | [TA](docs/ta.md) | 技术选择、工程约束、数据安全与适度验证原则 |
 | [C2–C4 云端实现](docs/implementation/c-series-cloud-runtime.md) | 账号/Profile、云端处理、原档、导入与生命周期的源码边界；不自动授权启用 |
 | [As-Is](docs/as-is.md) | 已实现行为、实现限制和源码入口；不保存测试或部署历史 |
-| [交付裁剪](docs/delivery-tailoring.md) | 按 Delivery Kit 的 43 类制品适用性、角色、仓库职责与本轮门；状态以文首为准 |
+| [交付依据与历史裁剪](docs/delivery-tailoring.md) | 当前交付依据及旧裁剪的历史查阅入口；旧制品矩阵和阶段门不约束当前任务 |
 | [owner-entry-v1 范围与验收条件](docs/delivery/owner-entry-v1.md) | 旧本人入口的历史 G1 基线；有效要求由当前第一阶段承接，不覆盖新增需求或恢复旧生产依赖 |
 | [Roadmap](docs/roadmap.md) | 待解决问题、优先级与进入条件；不重复实现清单 |
 | [ADR](docs/adr.md) | 重要选择的理由和取舍；不作日常变更日志 |
-| [术语与编号](docs/glossary.md) | 区分 GAP 差距、G 交付门及领域状态，历史编号按映射解释 |
+| [术语与编号](docs/glossary.md) | 区分 GAP 差距、历史 G 阶段门及领域状态，历史编号按映射解释 |
 | [第一阶段测试计划](docs/delivery/phase-1-test-plan.md) | 可重复测试入口、环境、选测范围与未覆盖层；不代替本人效用验收 |
 | [单节点部署](deployment/standalone/README.md) | 一键部署、配置与数据位置、换节点与故障定位；不保存实例状态 |
 | [第一阶段业务接受记录](docs/delivery/acceptance.md) | P1-AC-01–09 的本人接受及证据入口；未执行不代签 |

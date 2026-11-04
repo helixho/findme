@@ -79,7 +79,7 @@
 <a id="owner-entry-nfr-g1"></a>
 ### 2.3 owner-entry-v1 历史质量要求（原 G1 最小定义）
 
-以下 ART-NFR 场景与验证方向属于 **owner-entry-v1 原 G1 基线**；保留其历史范围和验证义务，不将原 G1 通过状态套用于新的第一阶段。原系统验收条件见[owner-entry-v1 范围与 AC](delivery/owner-entry-v1.md)；新阶段的实际使用、持续对话、输入更新和本人反馈按[第一阶段范围](delivery/phase-1-personal-understanding.md)验收。量化阈值依据实际候选和测量确定，已有代码或旧环境结果不能直接充当通过证据。
+以下 ART-NFR 场景与验证方向属于 **owner-entry-v1 原 G1 基线**；仅供理解旧范围，适用边界见[交付依据与历史裁剪](delivery-tailoring.md)，不将原 G1 通过状态套用于新的第一阶段。原系统验收条件见[owner-entry-v1 范围与 AC](delivery/owner-entry-v1.md)；新阶段的实际使用、持续对话、输入更新和本人反馈按[第一阶段范围](delivery/phase-1-personal-understanding.md)验收。量化阈值依据实际候选和测量确定，已有代码或旧环境结果不能直接充当通过证据。
 
 | ID | 场景与最低要求 | 验证方向；G2 待定 |
 | --- | --- | --- |
