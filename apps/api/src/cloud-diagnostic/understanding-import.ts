@@ -24,19 +24,35 @@ export async function prepareUnderstandingImport(raw: unknown) {
   const bundle = parsed.data;
   if (new TextEncoder().encode(JSON.stringify(bundle)).length > 2 * 1024 * 1024)
     throw new CoreError("FEEDBACK_INPUT_BOUND_EXCEEDED", 422, "导入内容超过上限，不能静默截断");
+  const base = {
+    sources: bundle.sources.length,
+    insights: bundle.insights.length,
+    revisions: bundle.insights.reduce((n, i) => n + i.revisions.length, 0),
+    feedback: bundle.feedback.length,
+    model_calls: 0,
+    publication: "candidate_only" as const,
+  };
   return {
     bundle,
     input_hash: await requestHash(bundle),
-    summary: {
-      sources: bundle.sources.length,
-      insights: bundle.insights.length,
-      revisions: bundle.insights.reduce((n, i) => n + i.revisions.length, 0),
-      feedback: bundle.feedback.length,
-      model_calls: 0,
-      publication: "candidate_only" as const,
-    },
+    // Version 1 receipts keep their original shape; version 2 adds only counts.
+    summary:
+      bundle.format === "findme-understanding-import@2"
+        ? {
+            ...base,
+            format: bundle.format,
+            experiences: bundle.experiences.length,
+            answer_bindings: bundle.insights.reduce(
+              (n, i) => n + i.revisions.filter((r) => r.answer_binding).length,
+              0,
+            ),
+          }
+        : base,
   };
 }
+
+type Revision = UnderstandingImport["insights"][number]["revisions"][number];
+type Ref = Revision["origin"];
 
 /** Explicit, model-free import of a fixed conversation and its existing analysis history. */
 export class UnderstandingImportService {
@@ -124,7 +140,6 @@ export class UnderstandingImportService {
           rationale: "对话导入保留发言角色；引用、立场与个人判断尚未审核，不自动发布。",
         });
       }
-      type Ref = UnderstandingImport["insights"][number]["revisions"][number]["origin"];
       const saveSpan = async (ref: Ref) => {
         const token = `${ref.source_key}:${ref.start}:${ref.end}`;
         const existing = spans.get(token);
@@ -147,6 +162,25 @@ export class UnderstandingImportService {
       const claimIds: string[] = [];
       const revisionIds: string[] = [];
       const prefix = (await requestHash([bundle.namespace])).slice(0, 24);
+      const experiences = new Map(
+        bundle.format === "findme-understanding-import@2"
+          ? bundle.experiences.map((e) => [e.key, e] as const)
+          : [],
+      );
+      const groupOf = (ref: Ref) =>
+        "experience_key" in ref && ref.experience_key
+          ? `import:${prefix}:${ref.experience_key}`
+          : `import:${prefix}`;
+      const token = (ref: Pick<Ref, "source_key" | "start" | "end">) =>
+        `${ref.source_key}:${ref.start}:${ref.end}`;
+      // Answers chosen from the assistant's own options are elicited, never spontaneous.
+      const elicited = new Set(
+        bundle.insights.flatMap((i) =>
+          i.revisions.flatMap((r) =>
+            "answer_binding" in r && r.answer_binding ? [token(r.answer_binding.answer)] : [],
+          ),
+        ),
+      );
       for (const insight of bundle.insights) {
         const [claim] = await tx
           .insert(c.claims)
@@ -191,7 +225,10 @@ export class UnderstandingImportService {
               revisionReason: revision.reason,
               supersedesRevisionId: previousId,
               details: {
-                schema_version: "personal-understanding@1",
+                schema_version:
+                  bundle.format === "findme-understanding-import@2"
+                    ? "personal-understanding@2"
+                    : "personal-understanding@1",
                 ...revision.dimensions,
                 relations: revision.relations.map((link) => ({
                   target_revision_id: requiredEntry(
@@ -200,6 +237,24 @@ export class UnderstandingImportService {
                   ).id,
                   kind: link.kind,
                 })),
+                ...(bundle.format === "findme-understanding-import@2"
+                  ? {
+                      ...("answer_binding" in revision && revision.answer_binding
+                        ? {
+                            text_basis: revision.answer_binding.text_basis,
+                            answer_binding: revision.answer_binding,
+                          }
+                        : {}),
+                      // Only the experiences this revision's evidence actually touches.
+                      experiences: [...experiences.values()]
+                        .filter((e) =>
+                          refs.some(
+                            (ref) => "experience_key" in ref && ref.experience_key === e.key,
+                          ),
+                        )
+                        .map((e) => ({ ...e, independence_group: `import:${prefix}:${e.key}` })),
+                    }
+                  : {}),
               },
             })
             .returning();
@@ -217,9 +272,12 @@ export class UnderstandingImportService {
               relation,
               directness: "direct",
               contribution: "low",
-              independenceGroup: `import:${prefix}`,
+              independenceGroup: groupOf(ref),
               scopeMatch: "imported_unreviewed",
-              rationale: "导入关联，不把助手分析或同源复述计为独立个人证据。",
+              rationale:
+                relation !== "contextualizes" && elicited.has(token(ref))
+                  ? "回答由助手提问引出（elicited_by），是对助手所给选项的选择，不是自发表达，不计为独立个人证据。"
+                  : "导入关联，不把助手分析或同源复述计为独立个人证据。",
             });
           }
           revisions.set(`${insight.key}@${revision.version}`, { id: saved.id, refs });
@@ -250,6 +308,15 @@ export class UnderstandingImportService {
         ...summary,
         id: batch.id,
         understanding_namespace: bundle.namespace,
+        // Opaque identifiers only; labels stay in redactable revision details.
+        ...(bundle.format === "findme-understanding-import@2"
+          ? {
+              experience_groups: [...experiences.keys()].map((k) => ({
+                key: k,
+                independence_group: `import:${prefix}:${k}`,
+              })),
+            }
+          : {}),
         source_ids: [...sources.values()],
         claim_ids: claimIds,
         revision_ids: revisionIds,
@@ -294,6 +361,27 @@ export class UnderstandingImportService {
             .from(c.claimRevisions)
             .where(inArray(c.claimRevisions.id, ids("revision_ids")))
         : [];
+      const evidence = revisions.length
+        ? await tx
+            .select({
+              id: c.claimEvidence.id,
+              claimRevisionId: c.claimEvidence.claimRevisionId,
+              evidenceSpanId: c.claimEvidence.evidenceSpanId,
+              sourceItemId: c.evidenceSpans.sourceItemId,
+              locator: c.evidenceSpans.locator,
+              relation: c.claimEvidence.relation,
+              independenceGroup: c.claimEvidence.independenceGroup,
+              rationale: c.claimEvidence.rationale,
+            })
+            .from(c.claimEvidence)
+            .innerJoin(c.evidenceSpans, eq(c.evidenceSpans.id, c.claimEvidence.evidenceSpanId))
+            .where(
+              inArray(
+                c.claimEvidence.claimRevisionId,
+                revisions.map((r) => r.id),
+              ),
+            )
+        : [];
       const feedback = ids("feedback_ids").length
         ? await tx
             .select()
@@ -315,6 +403,7 @@ export class UnderstandingImportService {
         revisions: revisions.sort(
           (a, b) => a.claimId.localeCompare(b.claimId) || a.version - b.version,
         ),
+        evidence,
         feedback,
         publication: "candidate_only",
       };

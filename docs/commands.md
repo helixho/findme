@@ -223,10 +223,15 @@ AV 加工归档准备器：在 `apps/api` 下执行 `node --import tsx scripts/p
 
 ## 对话与已有理解导入
 
-`apps/api/scripts/prepare-understanding-import.ts --input ABS_JSON --out NEW_ABS_DIR`在本机校验`findme-understanding-import@1`包，输出规范化`bundle.json`和只含哈希/数量的manifest。经`pnpm --filter @findme/api exec tsx scripts/prepare-understanding-import.ts ...`运行；输入与输出必须用绝对路径，输出目录须为仓库外的新目录。命令不连接数据库、不调用模型，不把私人正文写入日志或Git。
+`apps/api/scripts/prepare-understanding-import.ts --input ABS_JSON --out NEW_ABS_DIR`在本机校验`findme-understanding-import@1`或`@2`包，输出规范化`bundle.json`和只含哈希/数量的manifest。经`pnpm --filter @findme/api exec tsx scripts/prepare-understanding-import.ts ...`运行；输入与输出必须用绝对路径，输出目录须为仓库外的新目录。命令不连接数据库、不调用模型，不把私人正文写入日志或Git；`@2`包的清单另含`format`、经历数和问答绑定数。
 
-账号API提供`POST /api/data/understanding-imports/preview`（输入bundle，返回校验哈希和数量）、`POST /api/data/understanding-imports`（`bundle`、预览的`input_hash`、`confirm: true`）及`GET /api/data/understanding-imports/:id`读回。保存使用认证Profile事务；同一namespace同内容重放返回原回执，不重复创建；同namespace不同内容拒绝覆盖。此入口导入一个固定会话快照及其中已有的修订历史，不是跨快照自动合并器。
+账号API提供`POST /api/data/understanding-imports/preview`（输入bundle，返回校验哈希和数量）、`POST /api/data/understanding-imports`（`bundle`、预览的`input_hash`、`confirm: true`）及`GET /api/data/understanding-imports/:id`读回（来源、修订、反馈，以及每条证据所属的独立组与说明）。保存使用认证Profile事务；同一namespace同内容重放返回原回执，不重复创建；同namespace不同内容拒绝覆盖。此入口导入一个固定会话快照及其中已有的修订历史，不是跨快照自动合并器。
 
-原始用户/助手发言分别保存为来源；助手洞察只存为候选或明确的历史状态，不自动进入当前认识，不将总体认可拆成逐条确认。来源片段以UTF-16位置精确核对；修订的领域/内容类型/分析作用、情境、有效时间与认识关系保存在`claim_revisions.details`，反馈引用原始用户来源与目标版本。模型尚未推理、数据库未处理与本人未确认分别表达。
+`@2`在`@1`之上增加两类可选信息，`@1`包的解析、哈希与写入保持不变：
+
+- **选择题回答**：认识修订可带`answer_binding`——问题原文片段、同一条助手消息中的全部选项（标签、文字、位置）、本次所选标签、本条认识对应的标签和用户回答片段，均须与来源逐字相符且回答晚于提问。此类认识必须是`self_report`，起点是用户的回答片段，正文是明确标为派生概括的文字，不能等于任何原话；回答由提问引出（`elicited_by`），写库时该证据行的说明如此标注。只表示认同某句描述的回答（如“很像”）不建成认识，改为指向该命题修订的反馈。
+- **经历分组**：批次用`experiences`声明经历（键、标签、性质`occurred`/`hypothetical`/`ongoing`/`recurring`、有效时间可未知），证据与起点片段用`experience_key`指向一个经历；同一经历的证据共用独立组`import:<前缀>:<经历键>`，未指定经历的证据保持整批共用组`import:<前缀>`，导入不会自动拆分。分组依据是实际经历而不是话题或消息；同一精确片段只能属于一个经历，声明了而无证据的经历被拒绝。经历键应是不含内容的标识，因为它会进入独立组名。
+
+原始用户/助手发言分别保存为来源；助手洞察只存为候选或明确的历史状态，不自动进入当前认识，不将总体认可拆成逐条确认。来源片段以UTF-16位置精确核对；修订的领域/内容类型/分析作用、情境、有效时间与认识关系（`@2`另有问答绑定、派生标记和该修订涉及的经历）保存在`claim_revisions.details`，反馈引用原始用户来源与目标版本。模型尚未推理、数据库未处理与本人未确认分别表达。
 
 现有数据库需要先具备`claim_revisions.details`列，才可部署使用该入口。当前结构定义在`packages/db/schema.sql`；部署不会自动修改已有库，需要数据库所有者在明确授权的更新中添加JSONB列及空对象默认值。新库按当前定义创建，不恢复旧迁移历史或清空旧库。
