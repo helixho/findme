@@ -35,6 +35,18 @@
         "repeat the same review without new information",
         "discard the verified reminder result"
       ]
+    },
+    {
+      "input": {
+        "material": "某社区志愿者提交了三次报名表出错的求助记录，没有日常活动、修复后结果或其他领域材料。",
+        "candidate": "这个人在生活中总是粗心，无法承担任何组织工作。"
+      },
+      "expected": [
+        "识别材料来自错误求助场景。",
+        "把观察限定为三次已报告事件，未采集领域保持未知。",
+        "如确有必要再查顺利场景与反例，不能要求补完全部生活。"
+      ],
+      "forbidden": ["从三个求助记录估计所有任务的失败频率。", "凭用户要求严厉评价保留全人格结论。"]
     }
   ]
 }

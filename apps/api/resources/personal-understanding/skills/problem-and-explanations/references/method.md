@@ -1,3 +1,15 @@
 # 方法依据
 
-依据：BA 第3–5节；docs/implementation/frameworks-and-insight-analysis.md 第10节；docs/implementation/personal-understanding-output.md。重构必须并列原问题，解释须附反例和可区分的新信息。
+## 来源、采用理由与边界
+
+本方法的 Reframe–Structure–Tension–Hypothesis 顺序是 FindMe 的产品分析结构，定义见 [洞察分析契约](../../../../../../../docs/implementation/frameworks-and-insight-analysis.md) §10及[BA](../../../../../../../docs/ba.md) §4.3；不是借用一个名称就已验证的心理治疗方法。
+
+采用理由：原问题和重构并列，重构仍可被否定；张力两端各需证据，竞争解释应产生不同的可观察结果。把概念转成“哪条信息会改变判断”的追问，减少只为证实初始解释而找材料。
+
+解释所调用的外部理论按用途追溯：[条件分析](../../behavior-and-conditions/references/method.md)承接COM-B，[需要与叙事](../../needs-values-and-narrative/references/method.md)承接SDT等。它们不构成本分析顺序已经有效的证明。
+
+适用边界：不预设所有问题都有更深心理原因；相同现象可由任务、环境、能力或动机解释。用户不同意只触发证据核对，不自动证明防御，也不自动证明原解释错误。
+
+## 版本
+
+方法说明版本：`ag01-methods@1.1`；来源核对日期：2026-11-04。论文以题名、年份及 DOI/原始发布页定位；动态官方说明以该日读取内容为准。运行时加载器按文件内容生成哈希，后续任务须记录实际读取版本。本文只简述采用理由，不复制文献全文或量表。

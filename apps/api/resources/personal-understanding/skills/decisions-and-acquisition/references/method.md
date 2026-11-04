@@ -21,6 +21,21 @@
 事件事实；获取时的预期；实际用途与成本；获取/留存原因是否有证据区分；有限的竞争解释或未知；可选、非强制的下一问。
 
 ## 来源与边界
-- BA §4.2“获取与使用”、§7；DA §3.7“目标”与§5修订。
+- BA §4.2–4.3的经历还原与解释比较、§7质量要求；DA §3.7的认识分类与§5修订。
 - 预期后悔、补偿性消费和目标进展感只能作为候选解释，不能代替事件证据。
 - 囤积障碍是临床问题，需评估持久难以丢弃、困扰与生活功能影响；本方法不诊断。
+
+## 可追溯来源与采用说明
+
+- Gabler、Landers、Reynolds（2017），[Purchase decision regret: Negative consequences of the Steadily Increasing Discount strategy](https://www.sciencedirect.com/science/article/pii/S0148296317300073)。出版社正文读取受限；核对原论文题录与摘要，并在[专题原文合集](https://hinterhuber.com/wp-content/uploads/2021/03/The-micro-foundations-of-pricing-JBR_2017-1.pdf)定位题名及摘要（期刊页201–208）。仅用于提示区分折扣、稀缺与预期后悔，不引用未核验的效应量，不推广为所有购买都由后悔驱动。
+- Gonçalves、Nique、Gonçalves（2017），[Shopping the way to my goals](https://revistas.usp.br/rausp/en/article/view/135253)，DOI 10.1016/j.rausp.2017.05.002。核对期刊原始摘要：研究关注购买情境与主观目标进展感，不等于实际学会或习惯形成；全文PDF未完成逐段核验。
+- Wang、Tian（2025），[Within-domain and across-domain compensation](https://pmc.ncbi.nlm.nih.gov/articles/PMC11742516/)，DOI 10.1186/s40359-024-02277-5。核对综述摘要及引言，采纳“获取可回应自我差距”的候选视角；这是文献综述，不是本人的机制证据。
+- [美国精神医学学会：Hoarding Disorder](https://www.psychiatry.org/patients-families/hoarding-disorder)。核对官方说明用于明确疾病评估边界，不因闲置、优惠购买或不处理物品而诊断。
+
+采用与改写：上述来源用于生成可区分的问题；获取、使用和留存的分别还原，以及价格价值与本人使用价值的区分，是本项目结合[BA](../../../../../../../docs/ba.md) §4.2–4.3的分析安排。保留实用、兴趣、外部变化等替代解释，不把研究中的群体结果当个人原因。
+
+原文获取层级已经分别列明；摘要支持的有限概念可用于探索，不以其支持治疗、量表或行为因果结论。
+
+## 版本
+
+方法说明版本：`ag01-methods@1.1`；来源核对日期：2026-11-04。论文以题名、年份及 DOI/原始发布页定位；动态官方说明以该日读取内容为准。运行时加载器按文件内容生成哈希，后续任务须记录实际读取版本。本文只简述采用理由，不复制文献全文或量表。

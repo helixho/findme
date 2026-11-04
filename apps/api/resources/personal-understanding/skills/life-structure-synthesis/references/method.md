@@ -1,3 +1,15 @@
 # 方法依据
 
-依据：BA 第3–4节；DA 第3、5、7节；docs/implementation/personal-understanding-output.md；docs/implementation/frameworks-and-insight-analysis.md 第10节。无需填满固定生活领域。
+## 来源、采用理由与边界
+
+Life Structure 在本项目中是组织角色、目标、约束、恢复和关系等材料的开放表达，不是量表或固定人生模板。定义来自 [BA](../../../../../../../docs/ba.md) §4.3、[洞察分析契约](../../../../../../../docs/implementation/frameworks-and-insight-analysis.md) §10与[个人理解输出设计](../../../../../../../docs/implementation/personal-understanding-output.md) §2–3。
+
+理论参考按具体用途读取[需要与叙事的来源](../../needs-values-and-narrative/references/method.md)：用SDT提醒检视环境支持，用叙事视角区分经历与对经历的解释；不由这些理论预填个人结论。HUMAN 3.0仅保留内部设计的覆盖启发，本Skill未运行完整协议或计分，不给等级。
+
+采用理由：跨事件整理可以说明条件之间的联系，但需要同时标明未覆盖领域和替代解释。不是把多个摘要拼成新的个人事实。
+
+适用边界：多个领域可以共享同一来源，不重复计证；求助场景不是全生活样本。工作资料多不能推出身体、关系或意义领域较差。跨域因果要独立依据，没有就保留关联假设。
+
+## 版本
+
+方法说明版本：`ag01-methods@1.1`；来源核对日期：2026-11-04。论文以题名、年份及 DOI/原始发布页定位；动态官方说明以该日读取内容为准。运行时加载器按文件内容生成哈希，后续任务须记录实际读取版本。本文只简述采用理由，不复制文献全文或量表。

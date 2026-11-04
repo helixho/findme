@@ -8,4 +8,6 @@ description: >-
 
 符合触发条件时才加载本方法。只用已授权读取的材料；所有认识判断保持证据、范围、状态与来源可追溯。
 
+复核时必须检查接触场景偏差：求助或失败材料不能代表整个人，未覆盖领域保持未知。
+
 具体操作见 [method.md](references/method.md)，合成边界案例见 [examples.json](examples.json)。
