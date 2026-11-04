@@ -234,7 +234,7 @@ Agent 的会话、摘要和工作进度是执行状态，不是另一份个人�
 
 A4 的决策顺序是：用户当下意愿 → 还有没有必要澄清 → 哪条信息能区分解释 → 获得它的负担 → 继续、换题或结束。它不是为了增加轮次而设计的推荐引擎。
 
-引导提问与认识发布在当前设计中按 **Deterministic Gate → Semantic Planner → Deterministic Validator** 执行。资格、版本、open-question、预算/hard cap、幂等和明显重复属于程序规则；“哪一个未知最值得问、不同答案可能怎样改变当前理解”属于语义 Planner；Question/Claim 发布前再检查契约、证据引用、scope、版本和重复。Ask/Stop 约束主动补问，不把普通支持、解释或用户主动续聊一概转换成访谈。后置检查通过只说明满足当前策略，不等于事实正确。
+引导提问与认识发布在当前设计中按 **Deterministic Gate → Semantic Planner → Deterministic Validator** 执行；其中语义层由个人理解 Agent 承担，不要求固定的 Planner 调用步骤，前后两层的程序检查不变。资格、版本、open-question、预算/hard cap、幂等和明显重复属于程序规则；“哪一个未知最值得问、不同答案可能怎样改变当前理解”属于语义 Planner；Question/Claim 发布前再检查契约、证据引用、scope、版本和重复。Ask/Stop 约束主动补问，不把普通支持、解释或用户主动续聊一概转换成访谈。后置检查通过只说明满足当前策略，不等于事实正确。
 
 探索质量需要独立评测，不用“JSON 能解析”或“模型自己说 confidence 高”代替。固定合成集至少覆盖 Ask/Stop 是否合适、关键 uncertainty 是否命中、信息增益、重复追问、无依据推断、scope 越界、反例改变认识、证据可追溯和保存/Planner/Synthesis 各阶段延迟；真实 dogfood 补充负担与可理解性，不将私人原话直接固化进 repo fixture。
 

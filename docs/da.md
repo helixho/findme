@@ -276,7 +276,7 @@ Overview的四类认识是阅读提纲，不是互斥人格维度或统一评分
 
 ### 5.7 认识形成策略与决策血缘
 
-Epistemic Policy 不替代领域本体，而是规定“这些对象在什么条件下可以参与一次认识决策”。首版至少分三层：**Deterministic Gate → Semantic Planner / Synthesizer → Deterministic Validator**。Gate 负责租户、用途资格、版本、open-question 状态、问题预算、hard cap、重复请求等可确定规则；模型负责比较候选解释、识别关键不确定性、生成有限表述；Validator 再检查输出是否引用真实 evidence、是否越界扩大 scope、是否违反 Ask/Stop 契约、是否重复已问问题或发布已过期结果。
+Epistemic Policy 不替代领域本体，而是规定“这些对象在什么条件下可以参与一次认识决策”。首版至少分三层：**Deterministic Gate → Semantic Planner / Synthesizer → Deterministic Validator**。Gate 负责租户、用途资格、版本、open-question 状态、问题预算、hard cap、重复请求等可确定规则；模型负责比较候选解释、识别关键不确定性、生成有限表述；Validator 再检查输出是否引用真实 evidence、是否越界扩大 scope、是否违反 Ask/Stop 契约、是否重复已问问题或发布已过期结果。中间的语义层由个人理解 Agent 承担，不规定固定的 Planner/Synthesizer 调用步骤。
 
 探索决策本身也要可追溯。一次 Ask 至少能说明当前有限认识、目标 uncertainty、为什么不同答案可能改变判断、问题内容及问题预算；一次 Stop 至少能说明为什么继续询问主要只会增加细节，或为什么剩余未知更适合未来事件验证。无法指出目标 uncertainty 的问题不得仅因“还能继续聊”而创建。
 
