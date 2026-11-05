@@ -27,7 +27,7 @@ bootstrap 自行 clone/fetch 远端 main，检出确切提交，再执行该提�
 | 业务数据 | 数据库 |
 | 原档 | `/data/findme/files/` |
 
-`runtime.env` 不提交到 Git。其中的密码和密钥丢失后可以重建：重新部署会重设数据库账号密码，新的账号密钥只会让已登录的会话失效。登录身份与实例网址无关，换网址或换节点后用原账号登录仍对应原有数据。
+登录用户名和密码以 `runtime.env` 的 `OWNER_EMAIL`、`OWNER_PASSWORD` 为准，每次部署都会同步；`OWNER_EMAIL` 可以是不带 @ 的用户名。要修改，在实例上运行 `bash scripts/set-owner-login.sh`，按提示输入用户名和密码（输入不显示）。`runtime.env` 不提交到 Git。其中的密码和密钥丢失后可以重建：重新部署会重设数据库账号密码，新的账号密钥只会让已登录的会话失效。登录身份与实例网址无关，换网址或换节点后用原账号登录仍对应原有数据。
 
 外部数据库：在 `runtime.env` 中同时设置 `DATABASE_LOCATION`（如 `host/db?sslmode=require`）与 `DATABASE_ADMIN_URL`（数据库所有者连接），重新部署后不再启动本机数据库容器。
 

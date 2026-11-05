@@ -4,7 +4,7 @@ import { type Page, expect, test } from "@playwright/test";
 // No route interception and no generated understanding/report fixtures.
 async function login(page: Page) {
   await page.goto("/");
-  await page.getByLabel("邮箱").fill("browser@validation.invalid");
+  await page.getByLabel("用户名").fill("browser@validation.invalid");
   await page.getByLabel("密码").fill("Synthetic-Browser-Only-2026!");
   await page.getByRole("button", { name: "登录", exact: true }).click();
   await expect(page.getByRole("button", { name: "FindMe 首页" })).toBeVisible();

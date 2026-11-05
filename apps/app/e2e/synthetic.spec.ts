@@ -224,7 +224,7 @@ test("late response from a logged-out account cannot enter the next account", as
   await expect.poll(() => started).toBe(true);
   await page.getByText("合成账号", { exact: true }).click();
   await page.getByRole("button", { name: "退出账号" }).click();
-  await page.getByLabel("邮箱").fill("second@validation.invalid");
+  await page.getByLabel("用户名").fill("second@validation.invalid");
   await page.getByLabel("密码").fill("Synthetic-Password-2026!");
   await page.getByRole("button", { name: "登录", exact: true }).click();
   await expect(page.getByRole("button", { name: /新账号当前内容/ })).toBeVisible();

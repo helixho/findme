@@ -88,7 +88,9 @@ export function createAccountAuth(config: AccountConfig) {
     session: {
       modelName: "auth_sessions",
       cookieCache: { enabled: false },
-      expiresIn: 60 * 60 * 24 * 7,
+      // Personal use: stays signed in. 400 days is the cookie maximum; each
+      // day of use renews it, so only 400 days without any use signs out.
+      expiresIn: 60 * 60 * 24 * 400,
       updateAge: 60 * 60 * 24,
     },
     account: { modelName: "auth_accounts", accountLinking: { enabled: false } },
@@ -108,7 +110,7 @@ export function createAccountAuth(config: AccountConfig) {
       enabled: true,
       disableSignUp: !config.registrationEnabled,
       requireEmailVerification: true,
-      minPasswordLength: 12,
+      minPasswordLength: 8,
       maxPasswordLength: 128,
       sendResetPassword: async ({ user, url }) => {
         if (!config.sendMail) throw new Error("ACCOUNT_MAIL_UNAVAILABLE");

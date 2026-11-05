@@ -40,8 +40,29 @@ try {
   const auth = createAccountAuth({ ...config.auth, databaseUrl: required("DATABASE_URL_AUTH") });
   const identity = createDb(required("DATABASE_URL_IDENTITY"), { max: 1 });
   try {
-    const email = env.OWNER_EMAIL ?? "owner@findme.local";
-    const [existing] = await admin.sql`select id from auth_users where email=${email}`;
+    // runtime.env is the owner's login: OWNER_EMAIL may be a plain user name
+    // (signs in as <name>@findme.local) and OWNER_PASSWORD is applied on every
+    // setup, so changing either there and re-running setup changes the login.
+    const login = (env.OWNER_EMAIL ?? "owner@findme.local").trim().toLowerCase();
+    const email = login.includes("@") ? login : `${login}@findme.local`;
+    let [existing] = await admin.sql<
+      { id: string }[]
+    >`select id from auth_users where email=${email}`;
+    if (!existing) {
+      // A personal instance has one account: a new name renames it.
+      const users = await admin.sql<{ id: string }[]>`select id from auth_users`;
+      if (users.length === 1 && users[0]) {
+        existing = users[0];
+        await admin.sql`update auth_users set email=${email}, "updatedAt"=now() where id=${existing.id}`;
+      }
+    }
+    if (existing && env.OWNER_PASSWORD) {
+      const context = await auth.auth.$context;
+      await context.internalAdapter.updatePassword(
+        existing.id,
+        await context.password.hash(env.OWNER_PASSWORD),
+      );
+    }
     const user =
       existing ??
       (await createOwnerLogin(auth.auth, {

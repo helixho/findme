@@ -18,7 +18,14 @@ export function AccountGate({ ready }: { ready: () => void }) {
       if (!resetToken) {
         await cloudMutation(
           "/api/auth/sign-in/email",
-          { email, password, callbackURL: origin },
+          // A plain user name signs in as <name>@findme.local.
+          {
+            email: email.includes("@")
+              ? email.trim()
+              : `${email.trim().toLowerCase()}@findme.local`,
+            password,
+            callbackURL: origin,
+          },
           "POST",
           false,
         );
@@ -50,10 +57,11 @@ export function AccountGate({ ready }: { ready: () => void }) {
         <form onSubmit={submit}>
           {!resetToken && (
             <label>
-              邮箱
+              用户名
               <input
-                type="email"
-                autoComplete="email"
+                type="text"
+                autoComplete="username"
+                autoCapitalize="none"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
@@ -64,7 +72,7 @@ export function AccountGate({ ready }: { ready: () => void }) {
             密码
             <input
               type="password"
-              minLength={12}
+              minLength={8}
               maxLength={128}
               autoComplete={resetToken ? "new-password" : "current-password"}
               value={password}
