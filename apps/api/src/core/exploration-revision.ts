@@ -22,7 +22,11 @@ import { generateValidatedRevision } from "./exploration-validation.js";
 import type { CoreGateway } from "./llm.js";
 import { OBSERVATION_MODEL_ROUTE, REVISION_PROMPT_VERSION } from "./llm.js";
 import { completeCoreOperation, lockCoreOperation } from "./operations.js";
-import { loadLinkedForeignEvidence, staleOtherUsesOfSource } from "./prior-understanding.js";
+import {
+  assertEvidenceUsable,
+  loadLinkedForeignEvidence,
+  staleOtherUsesOfSource,
+} from "./prior-understanding.js";
 
 export async function correctUnderstanding(
   db: Db,
@@ -90,7 +94,7 @@ async function readCorrectionBasis(
   // evidence; offer it so the correction can keep (or drop) it explicitly.
   const foreign = await loadLinkedForeignEvidence(db, ctx, parsed.claim_revision_ids, localRows);
   const existingRows = [...localRows, ...foreign];
-  return { exploration, oldClaims, oldContext, existingRows };
+  return { exploration, oldClaims, oldRevisions, oldContext, existingRows };
 }
 
 type SavedCorrection = {
@@ -202,8 +206,8 @@ async function processSavedCorrection(
   parsed: { exploration_id: string; expected_version: number; correction_source_id: string },
   operationId?: string,
 ) {
-  const { saved, exploration, oldClaims, oldContext, existingRows } = await store.read(
-    async (db) => {
+  const { saved, exploration, oldClaims, oldRevisions, oldContext, existingRows } =
+    await store.read(async (db) => {
       const saved = await readSavedCorrection(
         db,
         ctx,
@@ -216,8 +220,7 @@ async function processSavedCorrection(
         claim_revision_ids: saved.claimRevisionIds,
       });
       return { saved, ...basis };
-    },
-  );
+    });
   const correctionRow = existingRows.find((row) => row.sourceItemId === saved.sourceId);
   if (!correctionRow)
     throw new CoreError("CORRECTION_NOT_ELIGIBLE", 409, "这条纠正已不再参与当前分析");
@@ -274,18 +277,28 @@ async function processSavedCorrection(
         ctx,
         exploration.id,
         parsed.expected_version,
+        { reopen: true },
       );
+      await assertEvidenceUsable(tx, ctx, rows);
 
       // Lock the targets through persistence: a concurrent cross-exploration
       // update (which does not bump this exploration) either waits or makes
       // this correction stale, never silently overwritten or duplicated.
       const targets = await tx
-        .select({ id: coreSchema.claimRevisions.id, status: coreSchema.claimRevisions.status })
+        .select({
+          id: coreSchema.claimRevisions.id,
+          status: coreSchema.claimRevisions.status,
+          evidenceStatus: coreSchema.claimRevisions.evidenceStatus,
+        })
         .from(coreSchema.claimRevisions)
         .where(inArray(coreSchema.claimRevisions.id, saved.claimRevisionIds))
         .orderBy(coreSchema.claimRevisions.id)
         .for("update");
-      const stillCurrent = targets.filter((row) => row.status === "current");
+      const stillCurrent = targets.filter(
+        (row) =>
+          row.status === "current" &&
+          row.evidenceStatus === oldRevisions.find((old) => old.id === row.id)?.evidenceStatus,
+      );
       if (stillCurrent.length !== saved.claimRevisionIds.length) {
         throw new CoreError("STALE_CLAIM_REVISION", 409, "认识版本已经发生变化");
       }

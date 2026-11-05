@@ -54,6 +54,14 @@ const feedbackLabels: Record<FeedbackKind, string> = {
   temporal_change: "现在的情况变了",
   utility_feedback: "这份理解是否有用",
 };
+const CORRECTION_TYPES = [
+  ["wrong_fact", "事实不对"],
+  ["missing_context", "缺少情境"],
+  ["overinterpreted", "解释过度"],
+  ["changed_now", "现在已经不同"],
+  ["not_mine", "不是我的表达"],
+  ["other", "其他"],
+] as const;
 const coverageLabels: Record<string, string> = {
   successful: "用于本次认识",
   reused: "沿用同源依据",
@@ -116,8 +124,13 @@ export function KnowledgeView({ requestScope }: { requestScope: string }) {
   const [title, setTitle] = useState(initialPending?.body.title ?? "");
   const [question, setQuestion] = useState(initialPending?.body.question ?? "");
   const [sourceIds, setSourceIds] = useState<string[]>(initialPending?.body.source_ids ?? []);
-  const [kind, setKind] = useState<FeedbackKind>("fact_correction");
   const [note, setNote] = useState("");
+  // Correcting a judgement uses the same save-first flow as the conversation it
+  // came from, so the home page, topics and replies share one state.
+  const [correcting, setCorrecting] = useState<string | null>(null);
+  const [correctionType, setCorrectionType] = useState("missing_context");
+  const [correctionNote, setCorrectionNote] = useState("");
+  const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -338,6 +351,78 @@ export function KnowledgeView({ requestScope }: { requestScope: string }) {
                     ? "未知"
                     : "暂有支持"}
               </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setCorrecting(finding.claim_revision_id);
+                  setCorrectionNote("");
+                  setNotice("");
+                }}
+              >
+                纠正这条
+              </button>
+              {correcting === finding.claim_revision_id && (
+                <div>
+                  <label>
+                    纠正类型
+                    <select
+                      value={correctionType}
+                      onChange={(event) => setCorrectionType(event.target.value)}
+                    >
+                      {CORRECTION_TYPES.map(([value, label]) => (
+                        <option key={value} value={value}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    说明
+                    <textarea
+                      rows={3}
+                      value={correctionNote}
+                      onChange={(event) => setCorrectionNote(event.target.value)}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    disabled={busy || !correctionNote.trim()}
+                    onClick={() =>
+                      void act(async () => {
+                        const saved = await cloudMutation<{
+                          exploration_id: string;
+                          version: number;
+                          correction_source_id: string;
+                        }>(`/api/core/claim-revisions/${finding.claim_revision_id}/corrections`, {
+                          correction: { type: correctionType, note: correctionNote.trim() },
+                        });
+                        setCorrecting(null);
+                        try {
+                          const revised = await cloudMutation<{ change_summary?: string }>(
+                            `/api/core/explorations/${saved.exploration_id}/correct`,
+                            {
+                              expected_version: saved.version,
+                              correction_source_id: saved.correction_source_id,
+                            },
+                          );
+                          setNotice(
+                            revised.change_summary
+                              ? `已修订：${revised.change_summary}`
+                              : "纠正已保存，仍在处理中。",
+                          );
+                        } catch (e) {
+                          setNotice(
+                            `纠正已保存，暂未处理：${errorMessage(e)}。可在“对话”里这件事下重新处理。`,
+                          );
+                        }
+                        await refresh();
+                      })
+                    }
+                  >
+                    保存纠正
+                  </button>
+                </div>
+              )}
               <EvidenceList title="支持" items={finding.support} />
               <EvidenceList title="反例" items={finding.counterexamples} />
               <EvidenceList title="情境" items={finding.context} />
@@ -401,19 +486,10 @@ export function KnowledgeView({ requestScope }: { requestScope: string }) {
               </article>
             ))}
           </details>
-          <h3>纠正或评价</h3>
+          {notice && <output>{notice}</output>}
+          <h3>这份理解有没有用</h3>
           <label>
-            反馈类型
-            <select value={kind} onChange={(event) => setKind(event.target.value as FeedbackKind)}>
-              {Object.entries(feedbackLabels).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            具体说明
+            评价
             <textarea rows={3} value={note} onChange={(event) => setNote(event.target.value)} />
           </label>
           <button
@@ -425,7 +501,7 @@ export function KnowledgeView({ requestScope }: { requestScope: string }) {
                   `/api/knowledge/topics/${encodeURIComponent(current.topic_key)}/feedback`,
                   {
                     expected_version: current.version,
-                    kind,
+                    kind: "utility_feedback",
                     note,
                     claim_revision_ids: [],
                   },
@@ -437,7 +513,7 @@ export function KnowledgeView({ requestScope }: { requestScope: string }) {
               })
             }
           >
-            保存反馈
+            保存评价
           </button>
         </section>
       )}

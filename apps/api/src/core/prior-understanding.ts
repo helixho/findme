@@ -495,7 +495,7 @@ export async function assertPriorContextIntact(
    * are locked in the same ordered statement and must still be current: a
    * cross-exploration update does not bump this exploration's version.
    */
-  local: Array<{ claimId: string; revisionId: string }> = [],
+  local: Array<{ claimId: string; revisionId: string; evidenceStatus?: string }> = [],
 ) {
   const priorIds = new Set([
     ...prior.claims.map((c) => c.claimId),
@@ -508,6 +508,7 @@ export async function assertPriorContextIntact(
       id: coreSchema.claimRevisions.id,
       claimId: coreSchema.claimRevisions.claimId,
       status: coreSchema.claimRevisions.status,
+      evidenceStatus: coreSchema.claimRevisions.evidenceStatus,
       invalidationReason: coreSchema.claimRevisions.invalidationReason,
     })
     .from(coreSchema.claimRevisions)
@@ -523,6 +524,74 @@ export async function assertPriorContextIntact(
   );
   if (local.some((basis) => current.get(basis.claimId) !== basis.revisionId))
     throw new CoreError("STALE_CLAIM_REVISION", 409, "认识版本已经发生变化");
+  // Evidence validity may change without a new revision (a source excluded in
+  // another conversation). Output generated from the old state must not commit.
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  if (
+    local.some(
+      (basis) =>
+        basis.evidenceStatus !== undefined &&
+        byId.get(basis.revisionId)?.evidenceStatus !== basis.evidenceStatus,
+    ) ||
+    prior.claims.some((claim) => {
+      const row = byId.get(claim.revisionId);
+      return row?.status === "current" && row.evidenceStatus !== "valid";
+    })
+  )
+    throw new CoreError("STALE_EXPLORATION_CONTEXT", 409, "参考的认识依据已经变化，请重新处理");
+}
+
+/**
+ * The evidence sources a model output was generated from must still be usable
+ * at commit: active, currently eligible, same assessment version. Sources are
+ * share-locked in id order after the conversation row and before claim
+ * revisions, matching source changes (conversations, then sources, then
+ * revisions), so an exclusion either waits for this commit and then
+ * invalidates its output, or makes this commit fail.
+ */
+export async function assertEvidenceUsable(
+  tx: Pick<Db, "select">,
+  ctx: PersonalContext,
+  rows: Array<{ sourceItemId: string; assessmentVersion: number | null }>,
+) {
+  const ids = [...new Set(rows.map((row) => row.sourceItemId))].sort();
+  if (!ids.length) return;
+  const sources = await tx
+    .select({ id: coreSchema.sourceItems.id, usageStatus: coreSchema.sourceItems.usageStatus })
+    .from(coreSchema.sourceItems)
+    .where(
+      and(
+        inArray(coreSchema.sourceItems.id, ids),
+        eq(coreSchema.sourceItems.tenantId, ctx.tenantId),
+        eq(coreSchema.sourceItems.subjectId, ctx.subjectId),
+      ),
+    )
+    .orderBy(coreSchema.sourceItems.id)
+    .for("share");
+  const assessments = await tx
+    .select({
+      sourceItemId: coreSchema.sourceAssessments.sourceItemId,
+      version: coreSchema.sourceAssessments.version,
+      eligibility: coreSchema.sourceAssessments.eligibility,
+    })
+    .from(coreSchema.sourceAssessments)
+    .where(
+      and(
+        inArray(coreSchema.sourceAssessments.sourceItemId, ids),
+        eq(coreSchema.sourceAssessments.isCurrent, true),
+      ),
+    );
+  const active = new Set(sources.filter((s) => s.usageStatus === "active").map((s) => s.id));
+  const current = new Map(assessments.map((a) => [a.sourceItemId, a]));
+  for (const row of rows) {
+    const assessment = current.get(row.sourceItemId);
+    if (
+      !active.has(row.sourceItemId) ||
+      assessment?.eligibility !== "eligible" ||
+      (row.assessmentVersion !== null && assessment.version !== row.assessmentVersion)
+    )
+      throw new CoreError("STALE_EXPLORATION_CONTEXT", 409, "依据的材料已经变化，请重新处理");
+  }
 }
 
 /**

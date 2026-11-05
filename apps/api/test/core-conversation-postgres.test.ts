@@ -1,6 +1,8 @@
 import { coreSchema, createDb } from "@findme/db";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { invalidateCloudSources } from "../src/cloud-diagnostic/effects.js";
+import { resolvePersonalContext } from "../src/core/identity.js";
 import { coreTestApp } from "./helper.js";
 
 // AG-07a on the existing chain: owner input is saved before model work, an
@@ -78,10 +80,17 @@ dbDescribe("Core conversation continuity (AG-07a)", () => {
   let failModel = false;
   // Runs while the reply is being generated, between its read and its commit.
   let duringReply: (() => Promise<void>) | null = null;
+  // Runs during the next model call whose system prompt contains `system`.
+  let duringStage: { system: string; run: () => Promise<void> } | null = null;
   const app = coreTestApp({
     db,
     gateway: gatewayOf(async (input) => {
       if (failModel) throw new Error("synthetic_provider_failure");
+      if (duringStage && (input.system ?? "").includes(duringStage.system)) {
+        const hook = duringStage;
+        duringStage = null;
+        await hook.run();
+      }
       if (duringReply && (input.system ?? "").includes("对话回应者")) {
         const hook = duringReply;
         duringReply = null;
@@ -97,6 +106,7 @@ dbDescribe("Core conversation continuity (AG-07a)", () => {
   beforeEach(async () => {
     failModel = false;
     duringReply = null;
+    duringStage = null;
     await sql.unsafe("TRUNCATE TABLE tenants RESTART IDENTITY CASCADE");
   });
   afterAll(async () => {
@@ -368,5 +378,119 @@ dbDescribe("Core conversation continuity (AG-07a)", () => {
     expect((await view(id)).pending.updates).toHaveLength(1);
     await ok(`/api/core/explorations/${id}/continue`, { expected_version: reply.version });
     expect((await view(id)).pending.updates).toEqual([]);
+  });
+
+  it("corrects one judgement from another view through the same flow", async () => {
+    const { id, done } = await understood();
+    const saved = await ok(
+      `/api/core/claim-revisions/${done.claims[0].claim_revision_id}/corrections`,
+      { correction: { type: "missing_context", note: "从专题纠正：当时上级也在场。" } },
+      noModel,
+    );
+    expect(saved.exploration_id).toBe(id);
+    const revised = await ok(`/api/core/explorations/${id}/correct`, {
+      expected_version: saved.version,
+      correction_source_id: saved.correction_source_id,
+    });
+    expect(revised.claims[0].scope).toContain("上级在场");
+    const current = await (await app.request("/api/core/understanding", { headers })).json();
+    expect(current.claims.map((c: { scope: string }) => c.scope)).toEqual([
+      revised.claims[0].scope,
+    ]);
+  });
+
+  it("processes a saved correction after the matter was finished", async () => {
+    const { id, done } = await understood();
+    const saved = await ok(`/api/core/explorations/${id}/corrections`, {
+      expected_version: done.version,
+      claim_revision_ids: [done.claims[0].claim_revision_id],
+      correction: { type: "missing_context", note: "上级也在场。" },
+    });
+    const completed = await ok(`/api/core/explorations/${id}/complete`, {
+      expected_version: saved.version,
+    });
+    const revised = await ok(`/api/core/explorations/${id}/correct`, {
+      expected_version: completed.version,
+      correction_source_id: saved.correction_source_id,
+    });
+    expect(revised.claims[0].scope).toContain("上级在场");
+    expect((await view(id)).status).toBe("active");
+  });
+
+  it("rejects a correction whose evidence source was excluded meanwhile", async () => {
+    const { id, done } = await understood();
+    const saved = await ok(`/api/core/explorations/${id}/corrections`, {
+      expected_version: done.version,
+      claim_revision_ids: [done.claims[0].claim_revision_id],
+      correction: { type: "missing_context", note: "上级也在场。" },
+    });
+    const [event] = (await db.select().from(coreSchema.sourceItems)).filter((s) =>
+      s.content.includes("关键数据还没核完"),
+    );
+    duringStage = {
+      system: "认识修订器",
+      run: async () => {
+        await db
+          .update(coreSchema.sourceItems)
+          .set({ usageStatus: "excluded" })
+          .where(eq(coreSchema.sourceItems.id, event?.id ?? ""));
+      },
+    };
+    const stale = await post(app, `/api/core/explorations/${id}/correct`, {
+      expected_version: saved.version,
+      correction_source_id: saved.correction_source_id,
+    });
+    expect(stale.status).toBe(409);
+    expect((await view(id)).pending.corrections).toHaveLength(1);
+  });
+
+  it("rejects a synthesis whose prior claim lost its evidence meanwhile", async () => {
+    const first = await understood();
+    const started = await ok("/api/core/explorations", { event: "另一次评审我也先听讨论。" });
+    duringStage = {
+      system: "认识整理器",
+      run: async () => {
+        await db
+          .update(coreSchema.claimRevisions)
+          .set({ evidenceStatus: "stale" })
+          .where(eq(coreSchema.claimRevisions.id, first.done.claims[0].claim_revision_id));
+      },
+    };
+    const stale = await post(app, `/api/core/explorations/${started.exploration.id}/continue`, {
+      expected_version: started.exploration.version,
+    });
+    expect(stale.status).toBe(409);
+  });
+
+  it("clears a reply built on a claim whose source is deleted", async () => {
+    await understood();
+    const started = await ok("/api/core/explorations", { event: "另一次评审我也先听讨论。" });
+    const second = await ok(`/api/core/explorations/${started.exploration.id}/continue`, {
+      expected_version: started.exploration.version,
+    });
+    const saved = await ok(`/api/core/explorations/${started.exploration.id}/messages`, {
+      expected_version: second.version,
+      message: "评审时我为什么总先听？",
+    });
+    const reply = await ok(`/api/core/explorations/${started.exploration.id}/reply`, {
+      expected_version: saved.version,
+      message_source_id: saved.message_source_id,
+    });
+    expect(reply.reply).toBeTruthy();
+    const [source] = (await db.select().from(coreSchema.sourceItems)).filter((s) =>
+      s.content.includes("关键数据还没核完"),
+    );
+    const ctx = await resolvePersonalContext(db, {
+      provider: "findme-runtime",
+      principalId: "owner",
+    });
+    await db.transaction((tx) => invalidateCloudSources(tx, ctx, [source?.id ?? ""], true));
+    const after = await view(started.exploration.id);
+    expect(
+      after.turns
+        .filter((t: { turnKind: string }) => t.turnKind === "reply")
+        .every((t: { content: string }) => t.content === ""),
+    ).toBe(true);
+    expect(after.pending.messages).toHaveLength(1);
   });
 });

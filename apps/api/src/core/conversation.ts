@@ -198,6 +198,53 @@ export async function saveCorrection(
   });
 }
 
+export const ClaimCorrectionInput = z.object({
+  claim_revision_id: z.string().uuid(),
+  correction: CorrectionInput,
+});
+
+/**
+ * Correct one judgement from any view (topic, full list) through the same
+ * save-first flow as the conversation it came from, so every view reads the
+ * same state afterwards.
+ */
+export async function saveClaimCorrection(
+  db: Db,
+  ctx: PersonalContext,
+  input: unknown,
+  operationId?: string,
+) {
+  const parsed = ClaimCorrectionInput.parse(input);
+  const [claim] = await db
+    .select({ claimKey: coreSchema.claims.claimKey })
+    .from(coreSchema.claimRevisions)
+    .innerJoin(coreSchema.claims, eq(coreSchema.claims.id, coreSchema.claimRevisions.claimId))
+    .where(
+      and(
+        eq(coreSchema.claimRevisions.id, parsed.claim_revision_id),
+        eq(coreSchema.claims.tenantId, ctx.tenantId),
+        eq(coreSchema.claims.subjectId, ctx.subjectId),
+      ),
+    )
+    .limit(1);
+  if (!claim) throw new CoreError("CLAIM_NOT_FOUND", 404, "认识不存在");
+  const explorationId = claim.claimKey.split("/")[0] ?? "";
+  if (!/^[0-9a-f-]{36}$/.test(explorationId))
+    throw new CoreError("CLAIM_NOT_FOUND", 404, "这条认识没有可以纠正的来源对话");
+  const exploration = await loadExploration(db, ctx, explorationId);
+  return saveCorrection(
+    db,
+    ctx,
+    {
+      exploration_id: exploration.id,
+      expected_version: exploration.version,
+      claim_revision_ids: [parsed.claim_revision_id],
+      correction: parsed.correction,
+    },
+    operationId,
+  );
+}
+
 /** Free follow-up in the same matter; reopens a finished conversation. */
 export async function saveExplorationMessage(
   db: Db,
@@ -532,10 +579,18 @@ export async function replyToMessageWith(
   const usedRevisions = [
     ...claims
       .filter((claim) => draft.used_claim_keys.includes(claim.key))
-      .map((claim) => ({ key: claim.key, claim_revision_id: claim.revisionId })),
+      .map((claim) => ({
+        key: claim.key,
+        claim_id: claim.claimId,
+        claim_revision_id: claim.revisionId,
+      })),
     ...prior.claims
       .filter((claim) => draft.used_claim_keys.includes(claim.key))
-      .map((claim) => ({ key: claim.key, claim_revision_id: claim.revisionId })),
+      .map((claim) => ({
+        key: claim.key,
+        claim_id: claim.claimId,
+        claim_revision_id: claim.revisionId,
+      })),
   ];
   const generation = {
     policy_version: PURPOSEFUL_EXPLORATION_POLICY.version,
@@ -555,6 +610,8 @@ export async function replyToMessageWith(
     validation_issues: issues,
     latency_ms: Date.now() - startedAt,
     used: usedRevisions,
+    // Every revision the model was given, for deletion propagation.
+    offered_claim_revision_ids: offeredIds,
     prior_understanding: priorSelectionMeta(prior),
   };
 
@@ -566,6 +623,7 @@ export async function replyToMessageWith(
         ctx,
         exploration.id,
         parsed.expected_version,
+        { reopen: true },
       );
       // Every revision offered to the model must still be current with valid
       // evidence, and stay so until this commit: lock them (conversation row

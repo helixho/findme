@@ -363,4 +363,35 @@ async function redactPriorUsers(
           ),
         ),
       );
+  // Direct replies record the claims they were given in their message's
+  // sourceMeta.reply; a reply built on the deleted claim is cleared and its
+  // message is offered for a new reply, so the old text never reaches a later
+  // conversation history.
+  const replied = await tx
+    .select({ id: c.sourceItems.id, meta: c.sourceItems.sourceMeta })
+    .from(c.sourceItems)
+    .where(
+      and(
+        eq(c.sourceItems.tenantId, ctx.tenantId),
+        eq(c.sourceItems.subjectId, ctx.subjectId),
+        or(
+          ...[...claims.map((claim) => claim.id), ...revisionIds].map(
+            (id) => sql`(${c.sourceItems.sourceMeta}->'reply')::text like ${`%${id}%`}`,
+          ),
+        ),
+      ),
+    );
+  for (const message of replied) {
+    const meta = (message.meta ?? {}) as Record<string, unknown>;
+    const turnId = (meta.reply as { turn_id?: unknown } | undefined)?.turn_id;
+    if (typeof turnId === "string")
+      await tx
+        .update(c.explorationTurns)
+        .set({ content: "" })
+        .where(eq(c.explorationTurns.id, turnId));
+    await tx
+      .update(c.sourceItems)
+      .set({ sourceMeta: { ...meta, reply_status: "pending", reply: { redacted: true } } })
+      .where(eq(c.sourceItems.id, message.id));
+  }
 }

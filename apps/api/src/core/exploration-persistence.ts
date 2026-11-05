@@ -11,19 +11,22 @@ export async function bumpExplorationVersion(
   ctx: PersonalContext,
   explorationId: string,
   expectedVersion: number,
+  /** Continuing the owner's saved input reopens a finished conversation. */
+  options: { reopen?: boolean } = {},
 ) {
   const [updated] = await db
     .update(coreSchema.explorations)
     .set({
       version: expectedVersion + 1,
       lastActivityAt: new Date(),
+      ...(options.reopen ? { status: "active", completedAt: null } : {}),
     })
     .where(
       and(
         eq(coreSchema.explorations.id, explorationId),
         eq(coreSchema.explorations.tenantId, ctx.tenantId),
         eq(coreSchema.explorations.subjectId, ctx.subjectId),
-        eq(coreSchema.explorations.status, "active"),
+        ...(options.reopen ? [] : [eq(coreSchema.explorations.status, "active")]),
         eq(coreSchema.explorations.version, expectedVersion),
       ),
     )

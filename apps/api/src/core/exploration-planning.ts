@@ -46,6 +46,7 @@ import { completeCoreOperation, lockCoreOperation } from "./operations.js";
 import {
   PRIOR_VALIDATOR_VERSION,
   applyPriorUpdates,
+  assertEvidenceUsable,
   assertPriorContextIntact,
   hasPriorContext,
   loadLinkedForeignEvidence,
@@ -266,6 +267,7 @@ async function generateAndCommitContinue(
           ctx,
           exploration.id,
           parsed.expected_version,
+          { reopen: true },
         );
         const existingOpen = await loadOpenQuestion(tx, exploration.id);
         await assertPriorContextIntact(tx, prior);
@@ -410,13 +412,19 @@ async function generateAndCommitContinue(
         ctx,
         exploration.id,
         parsed.expected_version,
+        { reopen: true },
       );
       const existingOpen = await loadOpenQuestion(tx, exploration.id);
+      await assertEvidenceUsable(tx, ctx, rows);
       await assertPriorContextIntact(
         tx,
         prior,
         "update",
-        claims.map((claim) => ({ claimId: claim.claimId, revisionId: claim.revisionId })),
+        claims.map((claim) => ({
+          claimId: claim.claimId,
+          revisionId: claim.revisionId,
+          evidenceStatus: claim.evidenceStatus,
+        })),
       );
       if (existingOpen) {
         throw new CoreError("QUESTION_NOT_OPEN", 409, "当前还有一个待回答的问题");

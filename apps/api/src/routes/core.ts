@@ -16,6 +16,7 @@ import { z } from "zod";
 import {
   listUnderstandingChanges,
   replyToMessageWith,
+  saveClaimCorrection,
   saveCorrection,
   saveExplorationMessage,
   setExplorationParked,
@@ -92,6 +93,7 @@ const ParkBody = z.object({
   parked: z.boolean(),
 });
 const WithdrawBody = z.object({ note: z.string().trim().max(2000).optional() });
+const ClaimCorrectionBody = z.object({ correction: CorrectUnderstandingInput.shape.correction });
 const ChangesQuery = z.object({
   limit: z.coerce.number().int().min(1).max(50).optional(),
 });
@@ -391,6 +393,17 @@ export function coreRoutes(
       request: input,
       successStatus: 200,
       execute: (operationId) => withdrawClaimByOwner(db, ctx, input, operationId),
+    });
+  });
+
+  r.post("/claim-revisions/:id/corrections", zValidator("json", ClaimCorrectionBody), async (c) => {
+    const ctx = await contextFor(c);
+    const input = { claim_revision_id: c.req.param("id"), ...c.req.valid("json") };
+    return runMutation(c, {
+      ctx,
+      operationType: "claim_correction_save",
+      request: input,
+      execute: (operationId) => saveClaimCorrection(db, ctx, input, operationId),
     });
   });
 
