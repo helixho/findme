@@ -1,10 +1,16 @@
--- FindMe database structure: the single current definition, applied only to an empty database.
+-- FindMe database structure: the current definition, applied as a whole to an empty database.
+-- Every change here also needs an upgrade script in migrations/ so existing databases keep their data.
 -- Access roles, grants and row-level policies for the runtime accounts live in access/account-runtime.sql.
 
 CREATE TABLE public.app_settings (
     key text NOT NULL PRIMARY KEY,
     value jsonb NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+CREATE TABLE public.schema_migrations (
+    name text NOT NULL PRIMARY KEY,
+    applied_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 CREATE TABLE public.auth_accounts (

@@ -16,7 +16,7 @@ bootstrap 自行 clone/fetch 远端 main，检出确切提交，再执行该提�
 
 已有干净 Git checkout 也可执行 `./scripts/install-deploy.sh`，安装该 checkout 的提交；更新到远端新版本使用 bootstrap。安装器支持 `--state-dir`、`--port`、`--public-url` 和 `--no-publish`，详见 `--help`。
 
-脚本在 Debian/Ubuntu 安装缺少的 Docker/Compose，保留已有 Docker；构建应用，启动数据库并等待就绪；数据库为空时按 `packages/db/schema.sql` 建表，已有表时不改结构；再应用账号角色与行级策略，首次创建本人账号，启动应用并检查网页、数据库与执行器。Instabox 中自动发布 HTTP 端口取得平台 HTTPS 地址；其他节点提供 `--public-url https://your-domain.example`，在节点入口配置 TLS。
+脚本在 Debian/Ubuntu 安装缺少的 Docker/Compose，保留已有 Docker；构建应用，启动数据库并等待就绪；数据库为空时按 `packages/db/schema.sql` 建表，已有库执行尚未执行的升级脚本；再应用账号角色与行级策略，首次创建本人账号，启动应用并检查网页、数据库与执行器。Instabox 中自动发布 HTTP 端口取得平台 HTTPS 地址；其他节点提供 `--public-url https://your-domain.example`，在节点入口配置 TLS。
 
 ## 配置与数据
 
@@ -35,7 +35,7 @@ bootstrap 自行 clone/fetch 远端 main，检出确切提交，再执行该提�
 
 ## 数据库结构
 
-表结构只有一份当前定义 `packages/db/schema.sql`。部署时数据库为空就按它建表；已有表时只做核对：缺少当前版本需要的表或字段，部署会以 `DATABASE_STRUCTURE_MISMATCH` 停止，不在不匹配的库上运行。本版本不提供旧库的自动转换；遇到该提示时在空库上部署，旧数据需要另行导出处理。
+新库按 `packages/db/schema.sql` 建表；已有库在部署时自动执行 `packages/db/migrations/` 中尚未执行的升级脚本，数据保留，规则见该目录的说明。升级后仍缺少当前版本需要的表或字段时，部署以 `DATABASE_STRUCTURE_MISMATCH` 停止，旧版本继续运行。
 
 ## 后台任务与休眠
 

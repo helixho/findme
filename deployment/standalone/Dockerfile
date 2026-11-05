@@ -24,6 +24,7 @@ COPY --from=build /runtime/ ./
 COPY --from=build /src/apps/app/dist ./public
 COPY packages/db/schema.sql ./packages/db/schema.sql
 COPY packages/db/access ./packages/db/access
+COPY packages/db/migrations ./packages/db/migrations
 RUN mkdir -p /data/files && chown node:node /data/files
 USER node
 EXPOSE 8000
