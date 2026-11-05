@@ -6,6 +6,7 @@ import { type Context, Hono } from "hono";
 import { z } from "zod";
 import { invalidateCloudSources } from "../cloud-diagnostic/effects.js";
 import { withProfileTransaction } from "../cloud-diagnostic/scope.js";
+import { replyToMessageWith } from "../core/conversation.js";
 import { CoreError } from "../core/errors.js";
 import { continueExplorationWith } from "../core/exploration-planning.js";
 import { loadExploration } from "../core/exploration-reading.js";
@@ -22,7 +23,11 @@ import { beginCoreOperation, markCoreOperationFailed } from "../core/operations.
  * between them, never inside one.
  */
 export const CORE_MODEL_WINDOW_MS = 24 * 60 * 60 * 1000;
-export const CORE_MODEL_OPERATION_TYPES = ["exploration_continue", "exploration_correct"] as const;
+export const CORE_MODEL_OPERATION_TYPES = [
+  "exploration_continue",
+  "exploration_correct",
+  "exploration_reply",
+] as const;
 /** A re-execution of a failed operation spends model requests again, so it is charged. */
 const RETRY_CHARGE_TYPE = "core_model_retry_charge";
 /** Upper bound of model requests one operation may make (2 planner + 2 synthesis attempts). */
@@ -39,10 +44,20 @@ const ContinueBody = z.object({
   expected_version: z.number().int().positive(),
   force_deeper: z.boolean().optional(),
 });
-const CorrectBody = z.object({
+const CorrectBody = z.union([
+  z.object({
+    expected_version: z.number().int().positive(),
+    correction_source_id: z.string().uuid(),
+  }),
+  z.object({
+    expected_version: z.number().int().positive(),
+    claim_revision_ids: z.array(z.string().uuid()).min(1),
+    correction: CorrectUnderstandingInput.shape.correction,
+  }),
+]);
+const ReplyBody = z.object({
   expected_version: z.number().int().positive(),
-  claim_revision_ids: z.array(z.string().uuid()).min(1),
-  correction: CorrectUnderstandingInput.shape.correction,
+  message_source_id: z.string().uuid(),
 });
 
 /**
@@ -248,12 +263,7 @@ export function accountCoreModelRoutes(options: AccountCoreModelOptions) {
     const model = requireGateway();
     const ctx = await options.contextFor(c);
     const body = c.req.valid("json");
-    const input = CorrectUnderstandingInput.parse({
-      exploration_id: c.req.param("id"),
-      expected_version: body.expected_version,
-      claim_revision_ids: body.claim_revision_ids,
-      correction: body.correction,
-    });
+    const input = { exploration_id: c.req.param("id"), ...body };
     return run(c, {
       ctx,
       operationType: "exploration_correct",
@@ -262,6 +272,20 @@ export function accountCoreModelRoutes(options: AccountCoreModelOptions) {
       basisVersion: input.expected_version,
       execute: (store, operationId) =>
         correctUnderstandingWith(store, model, ctx, input, operationId),
+    });
+  });
+
+  r.post("/explorations/:id/reply", zValidator("json", ReplyBody), async (c) => {
+    const model = requireGateway();
+    const ctx = await options.contextFor(c);
+    const input = { exploration_id: c.req.param("id"), ...c.req.valid("json") };
+    return run(c, {
+      ctx,
+      operationType: "exploration_reply",
+      request: input,
+      explorationId: input.exploration_id,
+      basisVersion: input.expected_version,
+      execute: (store, operationId) => replyToMessageWith(store, model, ctx, input, operationId),
     });
   });
 

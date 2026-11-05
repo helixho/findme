@@ -185,7 +185,7 @@ U2语义过程初次单次timeout为120秒，显式恢复运行可对已诊断�
 
 `/api/diagnostics` 创建/读取专题；`/:id/responses` 幂等保存原话，不触发模型；`/:id/process/plan` 只检查实际选材与请求阶段；`/:id/process` 在明确 `provider_call_cap` 下落库排队；`/jobs/:id/resume` 需显式新任务总cap，累计已用次数保留；cancel只停止后续与发布，不能承诺取消已经发出的计费请求。公开API不接受客户端提交“已审核报告”。history与evidence按当前scope和来源版本读取。
 
-任务由应用进程内的执行器从任务表领取。模型调用开关默认关闭，Profile预算默认0；Framework独立预算默认0，continue另有调用确认，均在 App 的模型设置中修改。对话处理（`/api/core/explorations/:id/continue`、`/correct`）另由“对话自动处理次数”控制：每个 Profile 滚动 24 小时的自动处理次数，默认0即关闭，需同时打开推理总开关；`GET /api/core/model-status` 只读返回用量，依据见 ADR D26。不存在绕过M-X2或切换个人Codex的云端fallback。
+任务由应用进程内的执行器从任务表领取。模型调用开关默认关闭，Profile预算默认0；Framework独立预算默认0，continue另有调用确认，均在 App 的模型设置中修改。对话处理（`/api/core/explorations/:id/continue`、`/correct`、`/reply`）另由“对话自动处理次数”控制：每个 Profile 滚动 24 小时的自动处理次数，默认0即关闭，需同时打开推理总开关；`GET /api/core/model-status` 只读返回用量，依据见 ADR D26。不存在绕过M-X2或切换个人Codex的云端fallback。
 
 `/api/blobs` 管理原档声明和鉴权内容传输，每个原档登记时生成一条 `original_file` 来源（作者未知、事件时间未知）；上传/删除/恢复属于真实对象副作用，仅在明确用户操作后执行。`/api/data/imports/prepare`、`restore-prepare` 只生成导入分片；preview保存预览，commit必须携带对应input_hash与confirm=true。导入不等于资格审核或发布旧L3。
 

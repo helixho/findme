@@ -4,8 +4,16 @@ import {
   UnderstandingDraft,
   UnderstandingWithPriorDraft,
 } from "@findme/core";
+import { z } from "zod";
 import type { createGateway } from "../llm/gateway.js";
 import { policyPromptPayload } from "./epistemic-policy.js";
+
+export const ConversationReplySchema = z.object({
+  reply: z.string().min(1).max(3000),
+  used_claim_keys: z.array(z.string().min(1).max(200)).max(12).default([]),
+  new_information: z.boolean(),
+  new_information_note: z.string().max(600).nullable().default(null),
+});
 
 export type CoreGateway = Pick<ReturnType<typeof createGateway>, "extract" | "describe">;
 
@@ -14,6 +22,7 @@ export const UNDERSTANDING_PROMPT_VERSION = "understanding-prompt@v2";
 export const REVISION_PROMPT_VERSION = "revision-prompt@v2";
 export const UNDERSTANDING_PRIOR_PROMPT_VERSION = "understanding-prior-prompt@v1";
 export const OBSERVATION_MODEL_ROUTE = "observation_model";
+export const CONVERSATION_REPLY_PROMPT_VERSION = "conversation-reply-prompt@v1";
 
 // Shared across planning, synthesis and revision so paraphrasing preserves the
 // same distinction between a person's expression and evidence for its content.
@@ -229,4 +238,34 @@ export async function generateUnderstandingWithPrior(gateway: CoreGateway, input
     system: `${UNDERSTANDING_PROMPT}\n\n${PRIOR_RULES}`,
   });
   return UnderstandingWithPriorDraft.parse(raw);
+}
+
+const CONVERSATION_REPLY_PROMPT = `你是 FindMe 的对话回应者。用户正在和你继续讨论 MATTER 这件事。直接回应 USER_MESSAGE：解释、比较选择、提供支持、给出建议或有依据地提出不同看法，按用户这次需要的来。
+
+输入包含 MATTER、CONVERSATION（本次讨论的历史）、THIS_CONVERSATION_CLAIMS、PRIOR_UNDERSTANDING（其他经历形成的当前认识，可能无关）、DO_NOT_USE_AS_PREMISE 和 USER_MESSAGE。
+
+规则：
+- 先回应用户这句话本身；用户说没听懂，就换一种说法解释；用户想比较选择，就按其目标和约束比较；用户说事情有进展，先接住进展。
+- 只在确实相关时使用已有认识；用到时用平实语言说明依据是什么、适用到哪里，不把以前的认识当成用户现在一定如此。
+- DO_NOT_USE_AS_PREMISE 里的内容不得作为前提，也不要复述。
+- 区分用户原话、你的推断和未知；不诊断、不贴人格标签、不预设隐藏动机。
+- 对用户与对已有认识采用同样的核对标准：依据充分时可以指出矛盾或可能的自我辩护，也要检查过度自责和此前可能的误读。
+- 不确定时说明缺什么信息；需要时最多提一个问题，不把回应变成问卷。
+- used_claim_keys 只列实际用到的认识 key，必须来自 THIS_CONVERSATION_CLAIMS 或 PRIOR_UNDERSTANDING。
+- 用户这句话带来了关于本人经历、处境、选择或想法的新事实时，new_information=true，并在 new_information_note 用一句话说明新在哪里；只是提问、请求解释或闲聊时为 false。
+- reply 用中文，口语、简洁，一般不超过 600 字。
+
+${EXPRESSION_FIDELITY_RULES}
+
+只输出以下 JSON：
+{"reply": "……", "used_claim_keys": [], "new_information": false, "new_information_note": null}`;
+
+export async function generateConversationReply(gateway: CoreGateway, input: string) {
+  return gateway.extract({
+    route: OBSERVATION_MODEL_ROUTE,
+    text: input,
+    schema: ConversationReplySchema,
+    strategy: "json_mode",
+    system: CONVERSATION_REPLY_PROMPT,
+  });
 }

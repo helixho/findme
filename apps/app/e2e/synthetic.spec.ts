@@ -660,6 +660,12 @@ test("correcting one claim keeps the other claims of the result", async ({ page 
         },
         201,
       ).then(() => true);
+    if (path === "/api/core/explorations/e3/corrections")
+      return json(
+        route,
+        { exploration_id: "e3", version: 3, correction_source_id: "s1", status: "pending" },
+        201,
+      ).then(() => true);
     if (path === "/api/core/explorations/e3/correct") {
       corrected = true;
       return json(
@@ -763,6 +769,12 @@ test("a correction still being processed is not reported as done", async ({ page
         },
         201,
       ).then(() => true);
+    if (path === "/api/core/explorations/e4/corrections")
+      return json(
+        route,
+        { exploration_id: "e4", version: 3, correction_source_id: "s1", status: "pending" },
+        201,
+      ).then(() => true);
     if (path === "/api/core/explorations/e4/correct") {
       keys.push(route.request().headers()["idempotency-key"] ?? "");
       return (
@@ -781,7 +793,8 @@ test("a correction still being processed is not reported as done", async ({ page
             )
       ).then(() => true);
     }
-    if (path === "/api/core/explorations/e4" && method === "GET")
+    if (path === "/api/core/explorations/e4" && method === "GET") {
+      const done = keys.length > 1;
       return json(route, {
         id: "e4",
         version: 3,
@@ -789,13 +802,30 @@ test("a correction still being processed is not reported as done", async ({ page
         phase: "review",
         open_question: null,
         latest_step: null,
+        turns: [],
+        // Saved but not yet processed until the second /correct completes.
+        pending: {
+          corrections: done
+            ? []
+            : [
+                {
+                  source_id: "s1",
+                  note: "只在部分情境成立。",
+                  correction_type: "missing_context",
+                  claim_revision_ids: ["r-one"],
+                  saved_at: "2026-11-05T00:00:00Z",
+                },
+              ],
+          messages: [],
+        },
         understanding: {
           outcome: "provisional",
-          claims: [claim("one2", "第一条修订后。")],
+          claims: done ? [claim("one2", "第一条修订后。")] : [claim("one", "第一条合成认识。")],
           gaps: [],
           needs_review: [],
         },
       }).then(() => true);
+    }
     return false;
   });
   await page.getByRole("button", { name: "对话" }).click();
@@ -804,9 +834,11 @@ test("a correction still being processed is not reported as done", async ({ page
   await page.getByRole("button", { name: "纠正这条" }).click();
   await page.getByLabel("说明").fill("只在部分情境成立。");
   await page.getByRole("button", { name: "保存纠正" }).click();
-  await expect(page.getByText(/纠正仍在处理/)).toBeVisible();
+  await expect(page.getByText(/纠正已保存，仍在处理中/)).toBeVisible();
   await expect(page.getByText(/已修订/)).toHaveCount(0);
-  await page.getByRole("button", { name: "保存纠正" }).click();
+  // The saved correction is listed and can be processed again with the same request.
+  await expect(page.getByText("已保存、尚未处理的纠正")).toBeVisible();
+  await page.getByRole("button", { name: "重新处理" }).click();
   await expect(page.getByText("已修订：收窄第一条")).toBeVisible();
   await expect(page.getByText("第一条修订后。")).toBeVisible();
   expect(keys[1]).toBe(keys[0]);

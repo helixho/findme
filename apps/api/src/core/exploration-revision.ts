@@ -1,6 +1,7 @@
 import { AmendSourceInput, CorrectUnderstandingInput } from "@findme/core";
 import { type Db, coreSchema } from "@findme/db";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
+import { ProcessCorrectionInput, saveCorrectionTx } from "./conversation.js";
 import {
   PURPOSEFUL_EXPLORATION_POLICY,
   REVISION_VALIDATOR_VERSION,
@@ -16,12 +17,7 @@ import {
   withdrawClaim,
 } from "./exploration-persistence.js";
 import { buildEvidenceSet, loadCurrentClaimRows, loadExploration } from "./exploration-reading.js";
-import {
-  type CoreStore,
-  type EvidenceRow,
-  type PersonalContext,
-  directCoreStore,
-} from "./exploration-types.js";
+import { type CoreStore, type PersonalContext, directCoreStore } from "./exploration-types.js";
 import { generateValidatedRevision } from "./exploration-validation.js";
 import type { CoreGateway } from "./llm.js";
 import { OBSERVATION_MODEL_ROUTE, REVISION_PROMPT_VERSION } from "./llm.js";
@@ -41,7 +37,7 @@ export async function correctUnderstanding(
 async function readCorrectionBasis(
   db: Db,
   ctx: PersonalContext,
-  parsed: ReturnType<typeof CorrectUnderstandingInput.parse>,
+  parsed: { exploration_id: string; expected_version: number; claim_revision_ids: string[] },
 ) {
   const exploration = await loadExploration(db, ctx, parsed.exploration_id);
   if (exploration.version !== parsed.expected_version) {
@@ -97,6 +93,51 @@ async function readCorrectionBasis(
   return { exploration, oldClaims, oldContext, existingRows };
 }
 
+type SavedCorrection = {
+  sourceId: string;
+  correction: { type: string; note: string };
+  claimRevisionIds: string[];
+  meta: Record<string, unknown>;
+};
+
+async function readSavedCorrection(
+  db: Db,
+  ctx: PersonalContext,
+  explorationId: string,
+  sourceId: string,
+): Promise<SavedCorrection> {
+  const [source] = await db
+    .select()
+    .from(coreSchema.sourceItems)
+    .where(
+      and(
+        eq(coreSchema.sourceItems.id, sourceId),
+        eq(coreSchema.sourceItems.tenantId, ctx.tenantId),
+        eq(coreSchema.sourceItems.subjectId, ctx.subjectId),
+      ),
+    )
+    .limit(1);
+  const meta = (source?.sourceMeta ?? {}) as Record<string, unknown>;
+  if (!source || meta.exploration_id !== explorationId)
+    throw new CoreError("CORRECTION_NOT_FOUND", 404, "这条纠正不存在");
+  if (meta.correction_status !== "pending")
+    throw new CoreError("CORRECTION_NOT_PENDING", 409, "这条纠正已经处理过");
+  return {
+    sourceId: source.id,
+    correction: { type: String(meta.correction_type ?? "other"), note: source.content },
+    claimRevisionIds: Array.isArray(meta.claim_revision_ids)
+      ? (meta.claim_revision_ids as string[])
+      : [],
+    meta,
+  };
+}
+
+/**
+ * Corrections are saved before any model work. The legacy body
+ * (`claim_revision_ids` + `correction`) saves first and then processes; a
+ * retry of the same operation reuses the correction it already saved.
+ * `correction_source_id` processes a correction saved earlier.
+ */
 export async function correctUnderstandingWith(
   store: CoreStore,
   gateway: CoreGateway,
@@ -104,26 +145,86 @@ export async function correctUnderstandingWith(
   input: unknown,
   operationId?: string,
 ) {
-  const parsed = CorrectUnderstandingInput.parse(input);
-  const { exploration, oldClaims, oldContext, existingRows } = await store.read((db) =>
-    readCorrectionBasis(db, ctx, parsed),
+  let target: { exploration_id: string; expected_version: number; correction_source_id: string };
+  if (input && typeof input === "object" && "correction_source_id" in input) {
+    target = ProcessCorrectionInput.parse(input);
+  } else {
+    const legacy = CorrectUnderstandingInput.parse(input);
+    const reused = operationId
+      ? await store.read(async (db) => {
+          const [row] = await db
+            .select({ id: coreSchema.sourceItems.id })
+            .from(coreSchema.sourceItems)
+            .where(
+              and(
+                eq(coreSchema.sourceItems.tenantId, ctx.tenantId),
+                eq(coreSchema.sourceItems.subjectId, ctx.subjectId),
+                sql`${coreSchema.sourceItems.sourceMeta}->>'correction_operation_id' = ${operationId}`,
+              ),
+            )
+            .limit(1);
+          if (!row) return null;
+          const exploration = await loadExploration(db, ctx, legacy.exploration_id);
+          return { id: row.id, version: exploration.version };
+        })
+      : null;
+    if (reused) {
+      target = {
+        exploration_id: legacy.exploration_id,
+        expected_version: reused.version,
+        correction_source_id: reused.id,
+      };
+    } else {
+      const saved = await store.write((db) =>
+        db.transaction((tx) =>
+          saveCorrectionTx(
+            tx as unknown as Db,
+            ctx,
+            legacy,
+            operationId ? { correction_operation_id: operationId } : {},
+          ),
+        ),
+      );
+      target = {
+        exploration_id: legacy.exploration_id,
+        expected_version: saved.version,
+        correction_source_id: saved.sourceId,
+      };
+    }
+  }
+  return processSavedCorrection(store, gateway, ctx, target, operationId);
+}
+
+async function processSavedCorrection(
+  store: CoreStore,
+  gateway: CoreGateway,
+  ctx: PersonalContext,
+  parsed: { exploration_id: string; expected_version: number; correction_source_id: string },
+  operationId?: string,
+) {
+  const { saved, exploration, oldClaims, oldContext, existingRows } = await store.read(
+    async (db) => {
+      const saved = await readSavedCorrection(
+        db,
+        ctx,
+        parsed.exploration_id,
+        parsed.correction_source_id,
+      );
+      const basis = await readCorrectionBasis(db, ctx, {
+        exploration_id: parsed.exploration_id,
+        expected_version: parsed.expected_version,
+        claim_revision_ids: saved.claimRevisionIds,
+      });
+      return { saved, ...basis };
+    },
   );
-  // Treat the correction as pending evidence during generation. Persist it only
-  // after the model output has passed schema/evidence/revision validation.
-  const pending: EvidenceRow = {
-    key: `E${existingRows.length + 1}`,
-    spanId: "pending",
-    sourceItemId: "pending",
-    quote: parsed.correction.note,
-    authorKind: "subject",
-    eligibility: "eligible",
-    assessmentVersion: 1,
-    attributionStatus: "confirmed_subject",
-    contextCompleteness: "partial",
-    temporalPrecision: "unknown",
-    assessmentRationale: "用户在 FindMe 原生探索中直接提供。",
-  };
-  const rows = [...existingRows, pending];
+  const correctionRow = existingRows.find((row) => row.sourceItemId === saved.sourceId);
+  if (!correctionRow)
+    throw new CoreError("CORRECTION_NOT_ELIGIBLE", 409, "这条纠正已不再参与当前分析");
+  // Keep the correction as the last evidence key, as before it was saved first.
+  const rows = [...existingRows.filter((row) => row !== correctionRow), correctionRow].map(
+    (row, index) => ({ ...row, key: `E${index + 1}` }),
+  );
 
   const revisionInput = [
     "EVIDENCE:",
@@ -133,7 +234,7 @@ export async function correctUnderstandingWith(
     JSON.stringify(oldContext),
     "",
     "USER_CORRECTION:",
-    JSON.stringify(parsed.correction),
+    JSON.stringify(saved.correction),
   ].join("\n");
 
   const oldKeys = oldContext.map((item) => item.key);
@@ -181,52 +282,21 @@ export async function correctUnderstandingWith(
       const targets = await tx
         .select({ id: coreSchema.claimRevisions.id, status: coreSchema.claimRevisions.status })
         .from(coreSchema.claimRevisions)
-        .where(inArray(coreSchema.claimRevisions.id, parsed.claim_revision_ids))
+        .where(inArray(coreSchema.claimRevisions.id, saved.claimRevisionIds))
         .orderBy(coreSchema.claimRevisions.id)
         .for("update");
       const stillCurrent = targets.filter((row) => row.status === "current");
-      if (stillCurrent.length !== parsed.claim_revision_ids.length) {
+      if (stillCurrent.length !== saved.claimRevisionIds.length) {
         throw new CoreError("STALE_CLAIM_REVISION", 409, "认识版本已经发生变化");
       }
-
-      const { source, span } = await createSource(tx, ctx, {
-        kind: "guided_response",
-        content: parsed.correction.note,
-        meta: {
-          exploration_id: exploration.id,
-          correction_type: parsed.correction.type,
-          claim_revision_ids: parsed.claim_revision_ids,
-          generation: revisionGeneration,
-        },
-        contextCompleteness: "partial",
-      });
-      pending.sourceItemId = source.id;
-      pending.spanId = span.id;
-
-      await tx.insert(coreSchema.experienceEvidence).values({
-        experienceId: exploration.experienceId,
-        evidenceSpanId: span.id,
-        relation: "describes",
-      });
-      await tx.insert(coreSchema.explorationTurns).values({
-        explorationId: exploration.id,
-        sourceItemId: source.id,
-        role: "user",
-        turnKind: "correction",
-        content: parsed.correction.note,
-      });
-      for (const targetId of parsed.claim_revision_ids) {
-        await tx.insert(coreSchema.feedbackEvents).values({
-          tenantId: ctx.tenantId,
-          subjectId: ctx.subjectId,
-          explorationId: exploration.id,
-          targetType: "claim_revision",
-          targetId,
-          feedbackType: parsed.correction.type,
-          note: parsed.correction.note,
-          sourceItemId: source.id,
-        });
-      }
+      // The saved correction must still be pending (no concurrent processing).
+      const [current] = await tx
+        .select({ meta: coreSchema.sourceItems.sourceMeta })
+        .from(coreSchema.sourceItems)
+        .where(eq(coreSchema.sourceItems.id, saved.sourceId))
+        .for("update");
+      if ((current?.meta as Record<string, unknown> | null)?.correction_status !== "pending")
+        throw new CoreError("CORRECTION_NOT_PENDING", 409, "这条纠正已经处理过");
 
       const persisted = [];
       for (const claim of draft.claims) {
@@ -261,16 +331,15 @@ export async function correctUnderstandingWith(
         .update(coreSchema.sourceItems)
         .set({
           sourceMeta: {
-            exploration_id: exploration.id,
-            correction_type: parsed.correction.type,
-            claim_revision_ids: parsed.claim_revision_ids,
+            ...saved.meta,
+            correction_status: "processed",
             generation: {
               ...revisionGeneration,
               claim_revision_ids: outputClaimRevisionIds,
             },
           },
         })
-        .where(eq(coreSchema.sourceItems.id, source.id));
+        .where(eq(coreSchema.sourceItems.id, saved.sourceId));
 
       await replaceGaps(tx, exploration.id, draft);
 
@@ -279,6 +348,7 @@ export async function correctUnderstandingWith(
         exploration_id: exploration.id,
         experience_id: exploration.experienceId,
         version: nextVersion,
+        correction_source_id: saved.sourceId,
         outcome,
         change_summary: draft.change_summary,
         revision_reason: draft.revision_reason,

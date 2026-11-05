@@ -141,6 +141,8 @@ export type ExplorationSummary = {
   experience_id: string;
   summary: string;
   open_question: GuidedQuestion | null;
+  parked?: boolean;
+  key_uncertainty?: string | null;
 };
 
 export type ExplorationListResponse = {
@@ -163,6 +165,8 @@ export type ExplorationView = {
   version: number;
   status: string;
   phase: ExplorationPhase;
+  parked?: boolean;
+  pending?: PendingInputs;
   started_at: string;
   last_activity_at: string;
   completed_at: string | null;
@@ -254,4 +258,26 @@ export type CoreModelStatus = {
   window_hours: number;
   operation_limit: number;
   operations_used: number;
+};
+
+export type PendingInputs = {
+  corrections: Array<{
+    source_id: string;
+    note: string;
+    correction_type: string | null;
+    claim_revision_ids: string[];
+    saved_at: string;
+  }>;
+  messages: Array<{ source_id: string; message: string; saved_at: string }>;
+};
+
+export type UnderstandingChange = {
+  claim_id: string;
+  claim_revision_id: string;
+  key: string;
+  change: "added" | "revised" | "withdrawn";
+  text: string;
+  scope: string;
+  reason: string | null;
+  changed_at: string;
 };

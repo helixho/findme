@@ -963,7 +963,14 @@ dbDescribe("Core reliability", () => {
     expect(rejectedRevision.status).toBe(500);
     expect(revisionCalls).toBe(2);
     expect(retryTexts.at(-1)).toContain("claim_scope_overreach:wait_for_information");
-    expect((await db.select().from(coreSchema.sourceItems)).length).toBe(2);
+    // The correction is saved before the model runs and survives the rejection.
+    const savedCorrection = (await db.select().from(coreSchema.sourceItems)).find((source) =>
+      source.content.includes("反例：信息充分的同类讨论里"),
+    );
+    expect((await db.select().from(coreSchema.sourceItems)).length).toBe(3);
+    expect((savedCorrection?.sourceMeta as Record<string, unknown>).correction_status).toBe(
+      "pending",
+    );
     expect(
       (await db.select().from(coreSchema.claimRevisions)).filter(
         (revision) => revision.status === "current",
@@ -977,14 +984,8 @@ dbDescribe("Core reliability", () => {
         method: "POST",
         headers: { ...auth, "Idempotency-Key": "revision-valid" },
         body: JSON.stringify({
-          expected_version: retriedBody.version,
-          claim_revision_ids: retriedBody.claims.map(
-            (claim: { claim_revision_id: string }) => claim.claim_revision_id,
-          ),
-          correction: {
-            type: "missing_context",
-            note: "反例：信息充分的同类讨论里我会直接表达。",
-          },
+          expected_version: retriedBody.version + 1,
+          correction_source_id: savedCorrection?.id,
         }),
       },
     );
@@ -1013,7 +1014,7 @@ dbDescribe("Core reliability", () => {
         "revision-policy-validator@v1",
         "observation_model",
         "test-observation-model",
-        retriedBody.version,
+        retriedBody.version + 1,
         retryTexts.at(-1),
       ]),
     );

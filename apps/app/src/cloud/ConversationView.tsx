@@ -5,6 +5,7 @@ import type {
   CoreModelStatus,
   CurrentUnderstandingResponse,
   ExplorationListResponse,
+  ExplorationSummary,
   ExplorationView,
   GapView,
   GuidedQuestion,
@@ -15,8 +16,10 @@ import type {
 import { message } from "./shared";
 
 // Account-mode conversation: every input is saved first, then processed with
-// the current understanding from earlier experiences. The visible result says
-// what changed; nothing here substitutes for the owner's own judgement.
+// the current understanding from earlier experiences. A matter stays open after
+// the explorer stops asking: the owner can keep talking, correct or stop using a
+// judgement, park it or finish it. Nothing here substitutes for the owner's own
+// judgement.
 
 type Ask = {
   exploration_id: string;
@@ -35,12 +38,19 @@ type Done = {
   gaps: GapView[];
   processing?: ProcessingView;
   prior_understanding?: PriorSelectionView;
+  view?: ExplorationView;
 };
 type Step =
   | { kind: "compose" }
   | { kind: "saved"; id: string; version: number; note: string; pending?: boolean }
   | { kind: "ask"; data: Ask }
   | { kind: "done"; data: Done };
+type Reply = {
+  version: number;
+  reply: string;
+  new_information: boolean;
+  new_information_note: string | null;
+};
 
 const STARTERS = [
   "最近一件让我在意的具体事情是……",
@@ -70,6 +80,7 @@ const CORRECTION_TYPES = [
   ["not_mine", "不是我的表达"],
   ["other", "其他"],
 ] as const;
+const THREAD_KINDS = new Set(["message", "reply", "correction", "stop_using"]);
 
 function explain(error: unknown) {
   if (error instanceof CloudApiError) {
@@ -77,17 +88,21 @@ function explain(error: unknown) {
       return "最近 24 小时的自动处理次数已用完。你的输入已保存，稍后可以继续处理。";
     if (error.code === "LLM_UNAVAILABLE") return "自动处理尚未启用。你的输入已保存。";
     if (error.code === "STALE_VERSION") return "这次交流已在其他地方更新，请重新打开。";
+    if (error.code === "STALE_CLAIM_REVISION")
+      return "相关认识已经变化。你的输入已保存，请在当前认识上重新提交。";
   }
   return message(error);
 }
 
-export function ConversationView() {
+export function ConversationView({ resumeId }: { resumeId?: string | null } = {}) {
   const [status, setStatus] = useState<CoreModelStatus | null>(null);
   const [current, setCurrent] = useState<CurrentUnderstandingResponse | null>(null);
-  const [active, setActive] = useState<ExplorationListResponse["items"][number] | null>(null);
+  const [open, setOpen] = useState<ExplorationSummary[]>([]);
+  const [recent, setRecent] = useState<ExplorationSummary[]>([]);
   const [step, setStep] = useState<Step>({ kind: "compose" });
   const [event, setEvent] = useState("");
   const [answer, setAnswer] = useState("");
+  const [followUp, setFollowUp] = useState("");
   const [options, setOptions] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -97,18 +112,17 @@ export function ConversationView() {
   const [notice, setNotice] = useState("");
 
   const refresh = useCallback(async () => {
-    const [s, c, list] = await Promise.all([
+    const [s, c, active, completed] = await Promise.all([
       cloudRequest<CoreModelStatus>("/api/core/model-status"),
       cloudRequest<CurrentUnderstandingResponse>("/api/core/understanding"),
-      cloudRequest<ExplorationListResponse>("/api/core/explorations?status=active&limit=1"),
+      cloudRequest<ExplorationListResponse>("/api/core/explorations?status=active&limit=10"),
+      cloudRequest<ExplorationListResponse>("/api/core/explorations?status=completed&limit=3"),
     ]);
     setStatus(s);
     setCurrent(c);
-    setActive(list.items[0] ?? null);
+    setOpen([...active.items].sort((a, b) => Number(!!a.parked) - Number(!!b.parked)));
+    setRecent(completed.items);
   }, []);
-  useEffect(() => {
-    void refresh().catch((e) => setError(explain(e)));
-  }, [refresh]);
 
   async function run(fn: () => Promise<void>) {
     setBusy(true);
@@ -142,14 +156,25 @@ export function ConversationView() {
         });
       setAnswer("");
       setOptions([]);
-      setStep(
-        next.phase === "awaiting_answer"
-          ? { kind: "ask", data: next as Ask }
-          : { kind: "done", data: next as Done },
-      );
+      if (next.phase === "awaiting_answer") return setStep({ kind: "ask", data: next as Ask });
+      setStep({ kind: "done", data: next as Done });
+      await attachView(id);
     } catch (e) {
       setStep({ kind: "saved", id, version, note: explain(e) });
     }
+  }
+
+  /** Adds the saved thread and pending inputs to a result already shown. */
+  async function attachView(id: string) {
+    const view = await cloudRequest<ExplorationView>(`/api/core/explorations/${id}`).catch(
+      () => null,
+    );
+    if (!view) return;
+    setStep((prev) =>
+      prev.kind === "done" && prev.data.exploration_id === id && prev.data.version === view.version
+        ? { kind: "done", data: { ...prev.data, view } }
+        : prev,
+    );
   }
 
   async function resume(id: string, allowProceed = true) {
@@ -168,7 +193,8 @@ export function ConversationView() {
           question: view.open_question,
         },
       });
-    if (view.phase === "ready_to_plan")
+    const talking = (view.turns ?? []).some((turn) => turn.turnKind === "reply");
+    if (view.phase === "ready_to_plan" && !talking)
       return allowProceed
         ? proceed(view.id, view.version)
         : setStep({
@@ -192,8 +218,56 @@ export function ConversationView() {
         gaps: view.understanding.gaps,
         processing: meta?.processing,
         prior_understanding: meta?.prior_understanding,
+        view,
       },
     });
+  }
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: open the requested matter once.
+  useEffect(() => {
+    void refresh().catch((e) => setError(explain(e)));
+    if (resumeId) void run(() => resume(resumeId, false));
+  }, [refresh, resumeId]);
+
+  /** Reply to a saved message; new facts then update the understanding. */
+  async function respond(id: string, version: number, sourceId: string) {
+    try {
+      const reply = await cloudMutation<Reply | { status: "processing" }>(
+        `/api/core/explorations/${id}/reply`,
+        { expected_version: version, message_source_id: sourceId },
+      );
+      if (isProcessingReply(reply)) {
+        setNotice("回应仍在生成，稍后刷新查看。");
+        return resume(id, false);
+      }
+      if (reply.new_information) {
+        setNotice("这次补充带来了新信息，正在据此更新认识。");
+        return proceed(id, reply.version);
+      }
+      return resume(id, false);
+    } catch (e) {
+      setNotice(`消息已保存。${explain(e)}`);
+      return resume(id, false);
+    }
+  }
+
+  /** The correction is saved first; processing may fail and be retried later. */
+  async function processCorrection(id: string, version: number, sourceId: string) {
+    try {
+      const revised = await cloudMutation<{ change_summary: string } | { status: "processing" }>(
+        `/api/core/explorations/${id}/correct`,
+        { expected_version: version, correction_source_id: sourceId },
+      );
+      await resume(id, false);
+      setNotice(
+        isProcessingReply(revised)
+          ? "纠正已保存，仍在处理中，稍后刷新查看。"
+          : `已修订：${revised.change_summary}`,
+      );
+    } catch (e) {
+      await resume(id, false);
+      setNotice(`纠正已保存，暂未处理：${explain(e)}`);
+    }
   }
 
   const usedCount =
@@ -211,7 +285,7 @@ export function ConversationView() {
       </p>
       {status && !status.enabled && (
         <output className="form-error">
-          自动处理尚未启用：输入可以保存，但暂时不会形成新的认识。
+          自动处理尚未启用：输入可以保存，但暂时不会形成新的认识或回应。
         </output>
       )}
       {status?.enabled && (
@@ -229,17 +303,69 @@ export function ConversationView() {
 
       {step.kind === "compose" && (
         <>
-          {active && (
-            <p>
-              <button
-                type="button"
-                className="button secondary"
-                disabled={busy}
-                onClick={() => void run(() => resume(active.id))}
-              >
-                继续上次：{active.summary.slice(0, 40)}
-              </button>
-            </p>
+          {open.length > 0 && (
+            <div className="conversation-open">
+              <h3>还没谈完的事</h3>
+              <ul>
+                {open.map((item) => (
+                  <li key={item.id}>
+                    <strong>{item.summary.slice(0, 60)}</strong>
+                    {item.parked && <span className="fm-status">暂缓</span>}
+                    <br />
+                    <span className="muted">
+                      {item.open_question
+                        ? `等你回答：${item.open_question.question}`
+                        : item.key_uncertainty
+                          ? `卡在：${item.key_uncertainty}`
+                          : "可以接着说"}
+                    </span>
+                    <div className="cloud-actions">
+                      <button
+                        type="button"
+                        className="button secondary"
+                        disabled={busy}
+                        onClick={() => void run(() => resume(item.id, false))}
+                      >
+                        继续
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() =>
+                          void run(async () => {
+                            await cloudMutation(`/api/core/explorations/${item.id}/park`, {
+                              expected_version: item.version,
+                              parked: !item.parked,
+                            });
+                          })
+                        }
+                      >
+                        {item.parked ? "恢复" : "暂缓"}
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {recent.length > 0 && (
+            <details className="fm-secondary-nav">
+              <summary>最近结束的事</summary>
+              <ul>
+                {recent.map((item) => (
+                  <li key={item.id}>
+                    {item.summary.slice(0, 60)}{" "}
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void run(() => resume(item.id, false))}
+                    >
+                      接着聊
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </details>
           )}
           {!current?.claims.length && (
             <div className="cloud-actions" aria-label="开始方式">
@@ -377,6 +503,7 @@ export function ConversationView() {
 
       {step.kind === "done" && (
         <div className="conversation-result">
+          {step.data.view?.experience && <h3>{step.data.view.experience.summary.slice(0, 80)}</h3>}
           {step.data.processing && (
             <output className="conversation-outcome">
               <strong>{RESULT_LABEL[step.data.processing.result]}</strong>
@@ -405,8 +532,8 @@ export function ConversationView() {
               本次参考了 {usedCount} 条已有认识；已撤回或失去依据的不作为前提。
             </p>
           )}
-          <h3>这次形成的认识</h3>
-          {step.data.claims.length === 0 && <p className="muted">这次没有形成新的认识。</p>}
+          <h3>这件事形成的认识</h3>
+          {step.data.claims.length === 0 && <p className="muted">目前没有形成认识。</p>}
           <ul>
             {step.data.claims.map((claim) => (
               <li key={claim.claim_revision_id}>
@@ -415,17 +542,34 @@ export function ConversationView() {
                 <span className="muted">
                   适用范围：{claim.scope} · 依据：{claim.confidence_basis}
                 </span>
-                <br />
-                <button
-                  type="button"
-                  className="button secondary"
-                  onClick={() => {
-                    setCorrecting(claim.claim_revision_id);
-                    setCorrectionNote("");
-                  }}
-                >
-                  纠正这条
-                </button>
+                <div className="cloud-actions">
+                  <button
+                    type="button"
+                    className="button secondary"
+                    onClick={() => {
+                      setCorrecting(claim.claim_revision_id);
+                      setCorrectionNote("");
+                    }}
+                  >
+                    纠正这条
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() =>
+                      void run(async () => {
+                        await cloudMutation(
+                          `/api/core/claim-revisions/${claim.claim_revision_id}/withdraw`,
+                          {},
+                        );
+                        await resume(step.data.exploration_id, false);
+                        setNotice("已停用这条认识，之后的回答和首页不会再使用它。");
+                      })
+                    }
+                  >
+                    以后不要再用这条
+                  </button>
+                </div>
                 {correcting === claim.claim_revision_id && (
                   <div className="conversation-correct">
                     <label>
@@ -456,23 +600,20 @@ export function ConversationView() {
                       disabled={busy || !correctionNote.trim()}
                       onClick={() =>
                         void run(async () => {
-                          const revised = await cloudMutation<
-                            (Done & { change_summary: string }) | { status: "processing" }
-                          >(`/api/core/explorations/${step.data.exploration_id}/correct`, {
+                          const saved = await cloudMutation<{
+                            version: number;
+                            correction_source_id: string;
+                          }>(`/api/core/explorations/${step.data.exploration_id}/corrections`, {
                             expected_version: step.data.version,
                             claim_revision_ids: [claim.claim_revision_id],
                             correction: { type: correctionType, note: correctionNote.trim() },
                           });
-                          if (isProcessingReply(revised)) {
-                            // Keep the editor: saving again reuses the same request.
-                            setNotice("纠正仍在处理，稍后再点“保存纠正”查看结果。");
-                            return;
-                          }
                           setCorrecting(null);
-                          // The response holds only the corrected claims; reload
-                          // the whole exploration so untouched claims stay visible.
-                          await resume(step.data.exploration_id);
-                          setNotice(`已修订：${revised.change_summary}`);
+                          await processCorrection(
+                            step.data.exploration_id,
+                            saved.version,
+                            saved.correction_source_id,
+                          );
                         })
                       }
                     >
@@ -493,13 +634,134 @@ export function ConversationView() {
               </ul>
             </>
           )}
-          <Finish
-            id={step.data.exploration_id}
-            version={step.data.version}
-            busy={busy}
-            run={run}
-            done={() => setStep({ kind: "compose" })}
-          />
+
+          {!!step.data.view?.pending?.corrections.length && (
+            <div className="conversation-saved">
+              <h3>已保存、尚未处理的纠正</h3>
+              {step.data.view.pending.corrections.map((item) => (
+                <p key={item.source_id}>
+                  {item.note}{" "}
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() =>
+                      void run(() =>
+                        processCorrection(
+                          step.data.exploration_id,
+                          step.data.version,
+                          item.source_id,
+                        ),
+                      )
+                    }
+                  >
+                    重新处理
+                  </button>
+                </p>
+              ))}
+            </div>
+          )}
+
+          <div className="conversation-thread">
+            <h3>接着聊这件事</h3>
+            {(step.data.view?.turns ?? [])
+              .filter((turn) => THREAD_KINDS.has(turn.turnKind))
+              .map((turn) => (
+                <p key={turn.id} className={turn.role === "user" ? "thread-user" : "thread-reply"}>
+                  <span className="muted">
+                    {turn.role === "user"
+                      ? turn.turnKind === "correction"
+                        ? "我的纠正"
+                        : turn.turnKind === "stop_using"
+                          ? "我要求停用"
+                          : "我"
+                      : "FindMe"}
+                    ：
+                  </span>
+                  {turn.content}
+                </p>
+              ))}
+            {step.data.view?.pending?.messages.map((item) => (
+              <p key={item.source_id} className="muted">
+                这条消息已保存，还没有回应：{item.message.slice(0, 60)}{" "}
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() =>
+                    void run(() =>
+                      respond(step.data.exploration_id, step.data.version, item.source_id),
+                    )
+                  }
+                >
+                  重新处理
+                </button>
+              </p>
+            ))}
+            <label>
+              接着说
+              <textarea
+                value={followUp}
+                maxLength={5000}
+                rows={3}
+                onChange={(e) => setFollowUp(e.target.value)}
+                placeholder="没听明白、想比较选择、事情有了进展，都可以直接说。"
+              />
+            </label>
+            <button
+              type="button"
+              className="button primary"
+              disabled={busy || !followUp.trim()}
+              onClick={() =>
+                void run(async () => {
+                  const saved = await cloudMutation<{ version: number; message_source_id: string }>(
+                    `/api/core/explorations/${step.data.exploration_id}/messages`,
+                    { expected_version: step.data.version, message: followUp.trim() },
+                  );
+                  setFollowUp("");
+                  await respond(step.data.exploration_id, saved.version, saved.message_source_id);
+                })
+              }
+            >
+              发送
+            </button>
+          </div>
+
+          <div className="cloud-actions">
+            {step.data.phase !== "completed" && (
+              <button
+                type="button"
+                className="button secondary"
+                disabled={busy}
+                onClick={() =>
+                  void run(async () => {
+                    await cloudMutation(`/api/core/explorations/${step.data.exploration_id}/park`, {
+                      expected_version: step.data.version,
+                      parked: true,
+                    });
+                    setStep({ kind: "compose" });
+                  })
+                }
+              >
+                先暂缓
+              </button>
+            )}
+            {step.data.phase !== "completed" ? (
+              <Finish
+                id={step.data.exploration_id}
+                version={step.data.version}
+                busy={busy}
+                run={run}
+                done={() => setStep({ kind: "compose" })}
+              />
+            ) : (
+              <button
+                type="button"
+                className="button secondary"
+                onClick={() => setStep({ kind: "compose" })}
+              >
+                返回
+              </button>
+            )}
+          </div>
         </div>
       )}
     </section>
@@ -527,7 +789,7 @@ function Finish(props: {
         })
       }
     >
-      结束这次，换个话题
+      这件事先到这里
     </button>
   );
 }

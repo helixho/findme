@@ -1,6 +1,7 @@
 import { CoreReportTarget } from "@findme/core";
 import { type Db, coreSchema } from "@findme/db";
 import { and, desc, eq } from "drizzle-orm";
+import { loadPendingInputs } from "./conversation.js";
 import { PURPOSEFUL_EXPLORATION_POLICY } from "./epistemic-policy.js";
 import { deriveExplorationPhase, hasPriorProcessing } from "./exploration-context.js";
 import {
@@ -87,7 +88,7 @@ export async function getExplorationView(db: Db, ctx: PersonalContext, explorati
     .limit(1);
   if (!experience) throw new Error("experience_not_found");
 
-  const [questions, turns, claims, gaps, evidence, openQuestion, hasWithdrawn, steps] =
+  const [questions, turns, claims, gaps, evidence, openQuestion, hasWithdrawn, steps, pending] =
     await Promise.all([
       db
         .select()
@@ -105,6 +106,7 @@ export async function getExplorationView(db: Db, ctx: PersonalContext, explorati
       loadOpenQuestion(db, exploration.id),
       hasWithdrawnClaim(db, ctx, exploration.id),
       loadExplorationSteps(db, exploration.id),
+      loadPendingInputs(db, ctx, exploration.id),
     ]);
 
   const validClaims = claims.filter((claim) => claim.evidenceStatus === "valid");
@@ -153,6 +155,8 @@ export async function getExplorationView(db: Db, ctx: PersonalContext, explorati
     version: exploration.version,
     status: exploration.status,
     phase,
+    parked: exploration.ext?.parked === true,
+    pending,
     started_at: exploration.startedAt,
     last_activity_at: exploration.lastActivityAt,
     completed_at: exploration.completedAt,
@@ -217,6 +221,7 @@ export async function listExplorations(
   const rows = await db
     .select({
       id: coreSchema.explorations.id,
+      ext: coreSchema.explorations.ext,
       status: coreSchema.explorations.status,
       version: coreSchema.explorations.version,
       startedAt: coreSchema.explorations.startedAt,
@@ -266,6 +271,8 @@ export async function listExplorations(
       completed_at: row.completedAt,
       experience_id: row.experienceId,
       summary: row.summary,
+      parked: (row.ext as { parked?: unknown } | null)?.parked === true,
+      key_uncertainty: steps.at(-1)?.keyUncertainty ?? null,
       open_question: openQuestion
         ? {
             id: openQuestion.id,

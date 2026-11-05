@@ -28,8 +28,8 @@
 - 实现位置：`apps/api/src/core/prior-understanding.ts` 负责选取、校验、写入和结果判定；`exploration-planning.ts` 中 Continue 的读取、生成、提交通过 `CoreStore` 分成三段；`exploration-revision.ts` 中 Correct 同样分段；账号路由在 `apps/api/src/routes/account-core-model.ts`。
 - 契约：`@findme/core` 新增 `PriorUnderstandingUpdate`、`PriorUnderstandingEffect`、`UnderstandingWithPriorDraft`。只有存在已有认识时，综合才使用 `understanding-prior-prompt@v1` 和该输出结构。零历史时提示词字节和输出契约不变。
 - 血缘：Ask 与 Stop 步骤的 `model_meta.prior_understanding` 记录实际提供给模型的修订 ID、版本和选取依据；Stop 步骤另记录 `processing`。“下一次回答使用了更新后的版本”可以直接按修订 ID 核对，不靠比对回复文字。
-- 账号端点：`GET /api/core/model-status`；`POST /api/core/explorations/:id/continue`、`/correct` 在账号模式启用后调用模型。其他 Core 端点保持原有的无模型路径。
-- App：账号版主导航新增“对话”，流程为保存 → 自动处理 → 必要时追问 → 显示处理结果、对已有认识的影响、本次形成的认识、仍不确定的部分 → 纠正或结束。处理失败或超限时提示“已保存”，并提供重新处理（同一幂等键）；收到 202（同一请求仍在处理）时不发起新处理，只提供“刷新状态”。
+- 账号端点：`GET /api/core/model-status`；`POST /api/core/explorations/:id/continue`、`/correct`、`/reply` 在账号模式启用后调用模型。其他 Core 端点保持原有的无模型路径。
+- App：账号版主导航新增“对话”，流程为保存 → 自动处理 → 必要时追问 → 显示处理结果、对已有认识的影响、本次形成的认识、仍不确定的部分 → 接着聊、纠正、停用、暂缓或结束；接着聊与纠正同样先保存再处理（见 [As-Is §15](../as-is.md#15-三条理解路径的现状关系)）。处理失败或超限时提示“已保存”，并提供重新处理（同一幂等键）；收到 202（同一请求仍在处理）时不发起新处理，只提供“刷新状态”。
 
 ## 4. 诊断专题与知识专题的关系（本轮只定边界）
 

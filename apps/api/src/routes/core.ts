@@ -13,6 +13,14 @@ import type { Db } from "@findme/db";
 import { zValidator } from "@hono/zod-validator";
 import { type Context, Hono } from "hono";
 import { z } from "zod";
+import {
+  listUnderstandingChanges,
+  replyToMessageWith,
+  saveCorrection,
+  saveExplorationMessage,
+  setExplorationParked,
+  withdrawClaimByOwner,
+} from "../core/conversation.js";
 import { CoreError } from "../core/errors.js";
 import {
   amendExplorationSource,
@@ -25,6 +33,7 @@ import {
   respondToExploration,
   startExploration,
 } from "../core/exploration-service.js";
+import { directCoreStore } from "../core/exploration-types.js";
 import { type Principal, resolvePersonalContext } from "../core/identity.js";
 import type { CoreGateway } from "../core/llm.js";
 import {
@@ -57,10 +66,34 @@ const RespondBody = z
     }
   });
 
-const CorrectBody = z.object({
+const SaveCorrectionBody = z.object({
   expected_version: z.number().int().positive(),
   claim_revision_ids: z.array(z.string().uuid()).min(1),
   correction: CorrectUnderstandingInput.shape.correction,
+});
+/** Either a new correction (saved first, then processed) or one saved earlier. */
+const CorrectBody = z.union([
+  z.object({
+    expected_version: z.number().int().positive(),
+    correction_source_id: z.string().uuid(),
+  }),
+  SaveCorrectionBody,
+]);
+const MessageBody = z.object({
+  expected_version: z.number().int().positive(),
+  message: z.string().trim().min(1).max(5000),
+});
+const ReplyBody = z.object({
+  expected_version: z.number().int().positive(),
+  message_source_id: z.string().uuid(),
+});
+const ParkBody = z.object({
+  expected_version: z.number().int().positive(),
+  parked: z.boolean(),
+});
+const WithdrawBody = z.object({ note: z.string().trim().max(2000).optional() });
+const ChangesQuery = z.object({
+  limit: z.coerce.number().int().min(1).max(50).optional(),
 });
 
 const VersionBody = z.object({
@@ -283,12 +316,7 @@ export function coreRoutes(
     if (!gateway) throw new CoreError("LLM_UNAVAILABLE", 503, "模型服务暂不可用");
     const ctx = await contextFor(c);
     const body = c.req.valid("json");
-    const input = CorrectUnderstandingInput.parse({
-      exploration_id: c.req.param("id"),
-      expected_version: body.expected_version,
-      claim_revision_ids: body.claim_revision_ids,
-      correction: body.correction,
-    });
+    const input = { exploration_id: c.req.param("id"), ...body };
     return runMutation(c, {
       ctx,
       operationType: "exploration_correct",
@@ -297,6 +325,78 @@ export function coreRoutes(
       basisVersion: input.expected_version,
       execute: (operationId) => correctUnderstanding(db, gateway, ctx, input, operationId),
     });
+  });
+
+  r.post("/explorations/:id/corrections", zValidator("json", SaveCorrectionBody), async (c) => {
+    const ctx = await contextFor(c);
+    const input = { exploration_id: c.req.param("id"), ...c.req.valid("json") };
+    return runMutation(c, {
+      ctx,
+      operationType: "exploration_correction_save",
+      request: input,
+      explorationId: input.exploration_id,
+      basisVersion: input.expected_version,
+      execute: (operationId) => saveCorrection(db, ctx, input, operationId),
+    });
+  });
+
+  r.post("/explorations/:id/messages", zValidator("json", MessageBody), async (c) => {
+    const ctx = await contextFor(c);
+    const input = { exploration_id: c.req.param("id"), ...c.req.valid("json") };
+    return runMutation(c, {
+      ctx,
+      operationType: "exploration_message_save",
+      request: input,
+      explorationId: input.exploration_id,
+      basisVersion: input.expected_version,
+      execute: (operationId) => saveExplorationMessage(db, ctx, input, operationId),
+    });
+  });
+
+  r.post("/explorations/:id/reply", zValidator("json", ReplyBody), async (c) => {
+    if (!gateway) throw new CoreError("LLM_UNAVAILABLE", 503, "模型服务暂不可用");
+    const ctx = await contextFor(c);
+    const input = { exploration_id: c.req.param("id"), ...c.req.valid("json") };
+    return runMutation(c, {
+      ctx,
+      operationType: "exploration_reply",
+      request: input,
+      explorationId: input.exploration_id,
+      basisVersion: input.expected_version,
+      execute: (operationId) =>
+        replyToMessageWith(directCoreStore(db), gateway, ctx, input, operationId),
+    });
+  });
+
+  r.post("/explorations/:id/park", zValidator("json", ParkBody), async (c) => {
+    const ctx = await contextFor(c);
+    const input = { exploration_id: c.req.param("id"), ...c.req.valid("json") };
+    return runMutation(c, {
+      ctx,
+      operationType: "exploration_park",
+      request: input,
+      explorationId: input.exploration_id,
+      basisVersion: input.expected_version,
+      successStatus: 200,
+      execute: (operationId) => setExplorationParked(db, ctx, input, operationId),
+    });
+  });
+
+  r.post("/claim-revisions/:id/withdraw", zValidator("json", WithdrawBody), async (c) => {
+    const ctx = await contextFor(c);
+    const input = { claim_revision_id: c.req.param("id"), ...c.req.valid("json") };
+    return runMutation(c, {
+      ctx,
+      operationType: "claim_withdraw",
+      request: input,
+      successStatus: 200,
+      execute: (operationId) => withdrawClaimByOwner(db, ctx, input, operationId),
+    });
+  });
+
+  r.get("/understanding/changes", zValidator("query", ChangesQuery), async (c) => {
+    const ctx = await contextFor(c);
+    return c.json(await listUnderstandingChanges(db, ctx, c.req.valid("query").limit));
   });
 
   r.get("/explorations", zValidator("query", ExplorationListQuery), async (c) => {

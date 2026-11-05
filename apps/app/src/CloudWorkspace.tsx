@@ -44,6 +44,7 @@ export default function CloudWorkspace() {
     | "frameworks"
   >("home");
   const [selectedRun, setSelectedRun] = useState<string | null>(null);
+  const [talkTarget, setTalkTarget] = useState<string | null>(null);
   const [detailPane, setDetailPane] = useState<ReportPane>("read");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -200,7 +201,7 @@ export default function CloudWorkspace() {
       <nav className="fm-shell-nav fm-nav" aria-label="主导航">
         {(
           [
-            ["home", "整体认识", Home],
+            ["home", "首页", Home],
             ["talk", "对话", MessageCircle],
             ["topics", "专题阅读", BookOpenText],
             ["history", "纠正与修订", History],
@@ -213,6 +214,7 @@ export default function CloudWorkspace() {
             onClick={() => {
               setView(key);
               setSelectedRun(null);
+              setTalkTarget(null);
               void action(refreshRuns);
             }}
           >
@@ -240,7 +242,9 @@ export default function CloudWorkspace() {
             requestScope={`${session.user.id}:${profile}`}
           />
         )}
-        {view === "talk" && profile && <ConversationView key={profile} />}
+        {view === "talk" && profile && (
+          <ConversationView key={`${profile}:${talkTarget ?? ""}`} resumeId={talkTarget} />
+        )}
         {view === "support" && profile && <SpecialistView key={profile} />}
         {view === "perspective" && profile && <PerspectiveView key={profile} />}
         {view === "data" && profile && <DataPanel key={profile} />}
@@ -265,6 +269,11 @@ export default function CloudWorkspace() {
                 profile={profile}
                 runs={runs}
                 mode={view as "home" | "topics" | "history"}
+                onTalk={(id) => {
+                  setTalkTarget(id ?? null);
+                  setView("talk");
+                  window.scrollTo({ top: 0, behavior: "instant" });
+                }}
                 onOpen={(id, pane = "read") => {
                   setSelectedRun(id);
                   setDetailPane(pane);
