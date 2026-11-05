@@ -49,7 +49,7 @@ async function setup(page: Page, custom?: (route: Route, path: string) => Promis
   await page.route("**/api/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
     if (custom && (await custom(route, path))) return;
-    if (path === "/api/auth/get-session")
+    if (path === "/api/session")
       return json(route, {
         user: { id: "u1", name: "合成账号", email: "synthetic@validation.invalid" },
       });
@@ -123,115 +123,6 @@ test("failed response save retries the identical body and idempotency key after 
   await expect.poll(() => attempts.length).toBe(2);
   expect(attempts[0].key).toBeTruthy();
   expect(attempts[1]).toEqual(attempts[0]);
-});
-
-test("profile switch isolates drafts", async ({ page }) => {
-  await setup(page);
-  await correct(page);
-  await page.getByRole("textbox").fill("资料一草稿");
-  await page.getByText("合成账号", { exact: true }).click();
-  await page.getByLabel("切换个人资料").selectOption("p2");
-  await expect(page.locator(".fm-account")).not.toHaveAttribute("open", "");
-  await correct(page);
-  await expect(page.getByRole("textbox")).toHaveValue("");
-  await page.getByText("合成账号", { exact: true }).click();
-  await page.getByLabel("切换个人资料").selectOption("p1");
-  await correct(page);
-  await expect(page.getByRole("textbox")).toHaveValue("资料一草稿");
-});
-
-test("late profile list response cannot overwrite the selected profile", async ({ page }) => {
-  let release!: () => void;
-  const held = new Promise<void>((r) => {
-    release = r;
-  });
-  let hold = false;
-  let started = false;
-  let completed = false;
-  await setup(page, async (route, path) => {
-    if (path === "/api/diagnostics") {
-      if (hold && route.request().headers()["x-findme-profile"] === "p1") {
-        started = true;
-        await held;
-        await json(route, [{ ...run, question: "旧资料晚到结果" }]);
-        completed = true;
-      } else
-        await json(
-          route,
-          route.request().headers()["x-findme-profile"] === "p2"
-            ? [{ ...run, question: "资料二当前结果" }]
-            : [run],
-        );
-      return true;
-    }
-    return false;
-  });
-  hold = true;
-  await page.getByRole("button", { name: "专题阅读", exact: true }).click();
-  await expect.poll(() => started).toBe(true);
-  await page.getByText("合成账号", { exact: true }).click();
-  await page.getByLabel("切换个人资料").selectOption("p2");
-  await expect(page.getByRole("button", { name: /资料二当前结果/ })).toBeVisible();
-  release();
-  await expect.poll(() => completed).toBe(true);
-  await expect(page.getByRole("button", { name: /资料二当前结果/ })).toBeVisible();
-  await expect(page.getByRole("button", { name: /旧资料晚到结果/ })).toHaveCount(0);
-});
-
-test("late response from a logged-out account cannot enter the next account", async ({ page }) => {
-  let nextAccount = false;
-  let hold = false;
-  let started = false;
-  let completed = false;
-  let release!: () => void;
-  const pending = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  await setup(page, async (route, path) => {
-    if (path === "/api/auth/sign-out") {
-      nextAccount = true;
-      await json(route, {});
-      return true;
-    }
-    if (path === "/api/auth/sign-in/email") {
-      await json(route, {});
-      return true;
-    }
-    if (nextAccount && path === "/api/auth/get-session") {
-      await json(route, {
-        user: { id: "u2", name: "第二合成账号", email: "second@validation.invalid" },
-      });
-      return true;
-    }
-    if (path === "/api/profiles") {
-      await json(route, nextAccount ? [profiles[1]] : [profiles[0]]);
-      return true;
-    }
-    if (path === "/api/diagnostics") {
-      if (hold && route.request().headers()["x-findme-profile"] === "p1") {
-        started = true;
-        await pending;
-        await json(route, [{ ...run, question: "前账号晚到内容" }]);
-        completed = true;
-      } else
-        await json(route, [{ ...run, question: nextAccount ? "新账号当前内容" : run.question }]);
-      return true;
-    }
-    return false;
-  });
-  hold = true;
-  await page.getByRole("button", { name: "专题阅读", exact: true }).click();
-  await expect.poll(() => started).toBe(true);
-  await page.getByText("合成账号", { exact: true }).click();
-  await page.getByRole("button", { name: "退出账号" }).click();
-  await page.getByLabel("用户名").fill("second@validation.invalid");
-  await page.getByLabel("密码").fill("Synthetic-Password-2026!");
-  await page.getByRole("button", { name: "登录", exact: true }).click();
-  await expect(page.getByRole("button", { name: /新账号当前内容/ })).toBeVisible();
-  release();
-  await expect.poll(() => completed).toBe(true);
-  await expect(page.getByRole("button", { name: /新账号当前内容/ })).toBeVisible();
-  await expect(page.getByRole("button", { name: /前账号晚到内容/ })).toHaveCount(0);
 });
 
 test("source inventory loads page beyond fifty and preserves earlier sources", async ({ page }) => {

@@ -14,7 +14,6 @@ import {
   resetCloudSession,
   selectCloudProfile,
 } from "./cloud-api";
-import { AccountGate } from "./cloud/AccountGate";
 import { CloudReadingHome } from "./cloud/CloudReadingHome";
 import { ConversationView } from "./cloud/ConversationView";
 import { DataPanel } from "./cloud/DataPanel";
@@ -56,7 +55,8 @@ export default function CloudWorkspace() {
     const request = ++sessionRequest.current;
     setLoading(true);
     try {
-      const value = await cloudRequest<Session | null>("/api/auth/get-session", {}, false);
+      // No sign-in: the instance acts as its single owner.
+      const value = await cloudRequest<Session | null>("/api/session", {}, false);
       if (request !== sessionRequest.current) return;
       if (value) {
         const ps = await cloudRequest<Profile[]>("/api/profiles", {}, false);
@@ -132,15 +132,14 @@ export default function CloudWorkspace() {
   if (loading)
     return (
       <main className="access-page">
-        <p>恢复账号与资料…</p>
+        <p>正在打开…</p>
       </main>
     );
   if (!session)
     return (
-      <>
-        <AccountGate ready={() => void refreshSession()} />
-        {error && <p className="global-error">{error}</p>}
-      </>
+      <main className="access-page">
+        <p>{error || "暂时连不上，请稍后刷新。"}</p>
+      </main>
     );
   return (
     <div className="app-root cloud-workspace">
@@ -159,48 +158,6 @@ export default function CloudWorkspace() {
             找我 <span>FindMe</span>
           </strong>
         </button>
-        <details className="fm-account">
-          <summary>{session.user.name || "我的资料"}</summary>
-          <div>
-            <label>
-              我的资料
-              <select
-                aria-label="切换个人资料"
-                value={profile}
-                onChange={(e) => {
-                  switchProfile(e.target.value);
-                  // The account popover must not cover report actions on narrow screens.
-                  e.currentTarget.closest("details")?.removeAttribute("open");
-                }}
-              >
-                {profiles
-                  .filter((p) => p.status === "active")
-                  .map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name ?? "我的资料"}
-                    </option>
-                  ))}
-              </select>
-            </label>
-            <button
-              type="button"
-              onClick={() =>
-                void action(async () => {
-                  await cloudMutation("/api/auth/sign-out", {}, "POST", false);
-                  sessionRequest.current++;
-                  runsRequest.current++;
-                  resetCloudSession();
-                  setSession(null);
-                  setProfile("");
-                  setSelectedRun(null);
-                  setRuns([]);
-                })
-              }
-            >
-              退出账号
-            </button>
-          </div>
-        </details>
       </header>
       <nav className="fm-shell-nav fm-nav" aria-label="主导航">
         {(

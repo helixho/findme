@@ -16,18 +16,18 @@ bootstrap 自行 clone/fetch 远端 main，检出确切提交，再执行该提�
 
 已有干净 Git checkout 也可执行 `./scripts/install-deploy.sh`，安装该 checkout 的提交；更新到远端新版本使用 bootstrap。安装器支持 `--state-dir`、`--port`、`--public-url` 和 `--no-publish`，详见 `--help`。
 
-脚本在 Debian/Ubuntu 安装缺少的 Docker/Compose，保留已有 Docker；构建应用，启动数据库并等待就绪；数据库为空时按 `packages/db/schema.sql` 建表，已有库执行尚未执行的升级脚本；再应用账号角色与行级策略，首次创建本人账号，启动应用并检查网页、数据库与执行器。Instabox 中自动发布 HTTP 端口取得平台 HTTPS 地址；其他节点提供 `--public-url https://your-domain.example`，在节点入口配置 TLS。
+脚本在 Debian/Ubuntu 安装缺少的 Docker/Compose，保留已有 Docker；构建应用，启动数据库并等待就绪；数据库为空时按 `packages/db/schema.sql` 建表，已有库执行尚未执行的升级脚本；再应用账号角色与行级策略，首次创建内部账号（无密码），启动应用并检查网页、数据库与执行器。Instabox 中自动发布 HTTP 端口取得平台 HTTPS 地址；其他节点提供 `--public-url https://your-domain.example`，在节点入口配置 TLS。
 
 ## 配置与数据
 
 | 内容 | 位置 |
 | --- | --- |
-| 启动配置：对外网址、端口、数据库位置与密码、账号密钥、本人初始账号 | `/data/findme/runtime.env`，首次部署生成，重复部署复用 |
+| 启动配置：对外网址、端口、数据库位置与密码、账号密钥 | `/data/findme/runtime.env`，首次部署生成，重复部署复用 |
 | 模型服务：服务商、接口地址、密钥、模型名称与调用预算 | 数据库 `app_settings`，由运营方在实例上维护，App 不提供修改入口；修改后重启应用生效 |
 | 业务数据 | 数据库 |
 | 原档 | `/data/findme/files/` |
 
-登录用户名和密码以 `runtime.env` 的 `OWNER_EMAIL`、`OWNER_PASSWORD` 为准，每次部署都会同步；`OWNER_EMAIL` 可以是不带 @ 的用户名。要修改，在实例上运行 `bash scripts/set-owner-login.sh`，按提示输入用户名和密码（输入不显示）。`runtime.env` 不提交到 Git。其中的密码和密钥丢失后可以重建：重新部署会重设数据库账号密码，新的账号密钥只会让已登录的会话失效。登录身份与实例网址无关，换网址或换节点后用原账号登录仍对应原有数据。
+实例不需要登录：打开地址即以本人身份使用，没有登录页、用户名和密码；数据挂在实例唯一的内部账号下。`runtime.env` 不提交到 Git。其中的密码和密钥丢失后可以重建：重新部署会重设数据库账号密码，新的账号密钥只会让已登录的会话失效。登录身份与实例网址无关，换网址或换节点后用原账号登录仍对应原有数据。
 
 外部数据库：在 `runtime.env` 中同时设置 `DATABASE_LOCATION`（如 `host/db?sslmode=require`）与 `DATABASE_ADMIN_URL`（数据库所有者连接），重新部署后不再启动本机数据库容器。
 

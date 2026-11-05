@@ -2,11 +2,9 @@ import { type Page, expect, test } from "@playwright/test";
 
 // Real browser HTTP/cookies, createApp and disposable PostgreSQL. Synthetic identity only.
 // No route interception and no generated understanding/report fixtures.
+// No sign-in: opening the App acts as the instance owner.
 async function login(page: Page) {
   await page.goto("/");
-  await page.getByLabel("用户名").fill("browser@validation.invalid");
-  await page.getByLabel("密码").fill("Synthetic-Browser-Only-2026!");
-  await page.getByRole("button", { name: "登录", exact: true }).click();
   await expect(page.getByRole("button", { name: "FindMe 首页" })).toBeVisible();
 }
 async function browserApi(page: Page, path: string, body?: unknown, key?: string, method = "POST") {
@@ -30,71 +28,7 @@ async function browserApi(page: Page, path: string, body?: unknown, key?: string
   );
 }
 
-test("real cookie login survives refresh and logout invalidates the session", async ({
-  page,
-  context,
-}) => {
-  await login(page);
-  expect(
-    (await context.cookies()).some((c) => c.name.includes("session_token") && c.httpOnly),
-  ).toBe(true);
-  await page.reload();
-  await expect(page.getByRole("button", { name: "FindMe 首页" })).toBeVisible();
-  await page.getByText("浏览器合成账号", { exact: true }).click();
-  await page.getByRole("button", { name: "退出账号" }).click();
-  await expect(page.getByRole("button", { name: "登录", exact: true })).toBeVisible();
-  expect((await browserApi(page, "/api/diagnostics")).status).toBe(401);
-  await page.reload();
-  await expect(page.getByRole("button", { name: "登录", exact: true })).toBeVisible();
-});
-
-test("real logout completes when the selected Profile changes while the request is in flight", async ({
-  page,
-}) => {
-  await login(page);
-  const previous = await page.evaluate(() => sessionStorage.getItem("findme_cloud:profile"));
-  expect(previous).toBeTruthy();
-  const profileName = `并发退出资料-${crypto.randomUUID().slice(0, 8)}`;
-  // The App no longer manages Profiles; a second one is created through the API.
-  const created = await browserApi(
-    page,
-    "/api/profiles",
-    { name: profileName },
-    crypto.randomUUID(),
-  );
-  expect(created.status).toBe(201);
-  await page.reload();
-  await page.getByText("浏览器合成账号", { exact: true }).click();
-  await page.getByLabel("切换个人资料").selectOption(String(created.body.id));
-  let release!: () => void;
-  let started = false;
-  const held = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  // Delay only delivery; the real API, session deletion and Set-Cookie response are untouched.
-  await page.route("**/api/auth/sign-out", async (route) => {
-    started = true;
-    await held;
-    await route.continue();
-  });
-  await page.getByText("浏览器合成账号", { exact: true }).click();
-  await page.getByRole("button", { name: "退出账号" }).click();
-  try {
-    await expect.poll(() => started).toBe(true);
-    await page.getByLabel("切换个人资料").selectOption(String(previous));
-  } finally {
-    release();
-  }
-  await expect(page.getByRole("button", { name: "登录", exact: true })).toBeVisible();
-  expect((await browserApi(page, "/api/diagnostics")).status).toBe(401);
-  await page.reload();
-  await expect(page.getByRole("button", { name: "登录", exact: true })).toBeVisible();
-});
-
-test("real account API rejects an untrusted Origin with valid browser cookies", async ({
-  page,
-  context,
-}) => {
+test("real account API rejects an untrusted Origin", async ({ page, context }) => {
   await login(page);
   // APIRequestContext shares this browser's cookie jar; Origin is deliberately hostile.
   const response = await context.request.post("/api/profiles", {

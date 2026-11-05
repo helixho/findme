@@ -3,7 +3,7 @@ import { createDb } from "@findme/db";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { createApp } from "./app.js";
-import { createAccountAuth } from "./auth/server.js";
+import { loadOwnerId, ownerSessions } from "./auth/owner.js";
 import { accountOptions, processingOptions } from "./cloud-diagnostic/config.js";
 import { accountRuntimeRoleQuery } from "./cloud-diagnostic/runtime-role.js";
 import { createCloudServices } from "./cloud-diagnostic/runtime.js";
@@ -23,7 +23,8 @@ const authConfig = accountOptions(process.env);
 const authUrl = process.env.DATABASE_URL_AUTH;
 const identityUrl = process.env.DATABASE_URL_IDENTITY;
 if (!authUrl || !identityUrl) throw new Error("ACCOUNT_DATABASE_ROLES_REQUIRED");
-const account = createAccountAuth({ ...authConfig, databaseUrl: authUrl });
+// No sign-in: every request acts as the instance's single owner account.
+const ownerId = await loadOwnerId(authUrl);
 const identity = createDb(identityUrl, { max: 2 });
 const blobs = fileBlobStore(process.env.FINDME_FILES_ROOT ?? "/data/files");
 const staticRoot = process.env.FINDME_STATIC_ROOT ?? "/app/public";
@@ -64,9 +65,8 @@ async function build() {
     coreModel: options.coreModel,
     auth: {
       mode: "account",
-      sessions: account.sessions,
+      sessions: ownerSessions(ownerId),
       trustedOrigins: authConfig.trustedOrigins,
-      handler: (request) => account.auth.handler(request),
     },
   });
   app.get("/ready", async (c) => {
@@ -106,7 +106,7 @@ for (const signal of ["SIGTERM", "SIGINT"] as const)
     timeout.unref();
     server.close();
     await current.worker.stop();
-    await Promise.all([connection.sql.end(), identity.sql.end(), account.close()]);
+    await Promise.all([connection.sql.end(), identity.sql.end()]);
     process.exit(0);
   });
 console.log(`api listening on ${env.HOST}:${env.PORT}`);

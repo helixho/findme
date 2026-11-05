@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { createDb } from "@findme/db";
 import { ProfileService } from "../auth/profiles.js";
-import { ACCOUNT_ISSUER, createAccountAuth, createOwnerLogin } from "../auth/server.js";
+import { ACCOUNT_ISSUER, createAccountAuth } from "../auth/server.js";
 import { accountOptions } from "../cloud-diagnostic/config.js";
 import { applyStructure, readMigrations } from "./migrate.js";
 
@@ -40,36 +40,19 @@ try {
   const auth = createAccountAuth({ ...config.auth, databaseUrl: required("DATABASE_URL_AUTH") });
   const identity = createDb(required("DATABASE_URL_IDENTITY"), { max: 1 });
   try {
-    // runtime.env is the owner's login: OWNER_EMAIL may be a plain user name
-    // (signs in as <name>@findme.local) and OWNER_PASSWORD is applied on every
-    // setup, so changing either there and re-running setup changes the login.
-    const login = (env.OWNER_EMAIL ?? "owner@findme.local").trim().toLowerCase();
-    const email = login.includes("@") ? login : `${login}@findme.local`;
-    let [existing] = await admin.sql<
-      { id: string }[]
-    >`select id from auth_users where email=${email}`;
-    if (!existing) {
-      // A personal instance has one account: a new name renames it.
-      const users = await admin.sql<{ id: string }[]>`select id from auth_users`;
-      if (users.length === 1 && users[0]) {
-        existing = users[0];
-        await admin.sql`update auth_users set email=${email}, "updatedAt"=now() where id=${existing.id}`;
-      }
-    }
-    if (existing && env.OWNER_PASSWORD) {
+    // No sign-in: one account owns the data and has no password. Existing
+    // passwords and sessions from the former login are removed.
+    let [owner] = await admin.sql<{ id: string }[]>`select id from auth_users order by "createdAt"`;
+    if (!owner) {
       const context = await auth.auth.$context;
-      await context.internalAdapter.updatePassword(
-        existing.id,
-        await context.password.hash(env.OWNER_PASSWORD),
+      owner = await context.internalAdapter.createUser(
+        { email: "owner@findme.local", name: "我", emailVerified: true },
+        { method: "admin" },
       );
     }
-    const user =
-      existing ??
-      (await createOwnerLogin(auth.auth, {
-        email,
-        name: "Owner",
-        password: required("OWNER_PASSWORD"),
-      }));
+    await admin.sql`delete from auth_accounts where "providerId" = 'credential'`;
+    await admin.sql`delete from auth_sessions`;
+    const user = owner;
     await new ProfileService(identity.db).resolve({
       provider: ACCOUNT_ISSUER,
       principalId: user.id,

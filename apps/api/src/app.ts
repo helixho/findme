@@ -72,6 +72,11 @@ export function createApp(opts: {
   api.use("*", account.middleware);
   // Shared, versioned method content; protected by the account session middleware above.
   api.route("/content", contentRoutes());
+  // Who this instance acts as; there is no sign-in page.
+  api.get("/session", (c) => {
+    const who = account.principal(c);
+    return c.json({ user: { id: who.principalId, name: "我", email: "" } });
+  });
 
   const cloud = opts.cloud;
   const principal = account.principal;

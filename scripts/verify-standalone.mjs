@@ -14,7 +14,7 @@ const config = Object.fromEntries(
 );
 const base = config.FINDME_PUBLIC_URL;
 const evidence = process.env.FINDME_VERIFY_STATE ?? "/tmp/findme-standalone-verification.json";
-let cookie = "";
+const cookie = "";
 let profile = "";
 async function request(path, method = "GET", body = undefined, expected = 200, raw = false) {
   const response = await fetch(base + path, {
@@ -47,16 +47,8 @@ assert.match((await fetch(origin + asset)).headers.get("cache-control"), /immuta
 await request("/health?strict=1");
 const ready = await (await request("/ready")).json();
 assert.equal(ready.worker.inferenceEnabled, false);
-await request("/api/profiles", "GET", undefined, 401);
-const login = await request("/api/auth/sign-in/email", "POST", {
-  email: config.OWNER_EMAIL,
-  password: config.OWNER_PASSWORD,
-});
-cookie = login.headers
-  .getSetCookie()
-  .map((value) => value.split(";")[0])
-  .join("; ");
-assert(cookie);
+// No sign-in: requests act as the instance owner.
+await request("/api/session");
 await request("/api/not-a-route", "GET", undefined, 404);
 let saved;
 if (process.argv[2] === "verify") {
@@ -116,9 +108,6 @@ if (process.env.FINDME_BROWSER_CDP) {
       const errors = [];
       page.on("pageerror", (error) => errors.push(error.message));
       await page.goto(base);
-      await page.getByLabel("邮箱", { exact: true }).fill(config.OWNER_EMAIL);
-      await page.getByLabel("密码", { exact: true }).fill(config.OWNER_PASSWORD);
-      await page.getByRole("button", { name: "登录", exact: true }).click();
       await page.getByRole("button", { name: "FindMe 首页" }).waitFor();
       await page.reload();
       await page.getByRole("button", { name: "FindMe 首页" }).waitFor();

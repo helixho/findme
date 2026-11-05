@@ -41,8 +41,6 @@ services:
       ACCOUNT_TRUSTED_ORIGINS: ${FINDME_PUBLIC_URL}
       ACCOUNT_SECRET: ${ACCOUNT_SECRET}
       ACCOUNT_REGISTRATION_ENABLED: '0'
-      OWNER_EMAIL: ${OWNER_EMAIL}
-      OWNER_PASSWORD: ${OWNER_PASSWORD}
     healthcheck:
       test: [CMD, node, -e, 'fetch("http://127.0.0.1:8000/ready").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))']
       interval: 30s

@@ -6,6 +6,7 @@ import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
 import { createApp } from "../src/app.js";
+import { ownerSessions } from "../src/auth/owner.js";
 import { createAccountAuth, createOwnerLogin } from "../src/auth/server.js";
 import { createCloudServices } from "../src/cloud-diagnostic/runtime.js";
 
@@ -46,15 +47,16 @@ const cloud = createCloudServices({
     timeoutMs: 1000,
   },
 });
+// No sign-in, as in production: the single owner account is created first.
+const owner = await createOwnerLogin(account.auth, {
+  email: "browser@validation.invalid",
+  name: "浏览器合成账号",
+  password: "Synthetic-Browser-Only-2026!",
+});
 const app = createApp({
   db: runtime.db,
   cloud,
-  auth: {
-    mode: "account",
-    sessions: account.sessions,
-    trustedOrigins: [origin],
-    handler: (req) => account.auth.handler(req),
-  },
+  auth: { mode: "account", sessions: ownerSessions(owner.id), trustedOrigins: [origin] },
 });
 const dist = fileURLToPath(new URL("../../app/dist/", import.meta.url));
 const host = new Hono();
@@ -78,13 +80,7 @@ for (const signal of ["SIGINT", "SIGTERM"])
   process.on(signal, () => {
     void close();
   });
-// Test suite identity only, never a test-only authentication endpoint.
 try {
-  await createOwnerLogin(account.auth, {
-    email: "browser@validation.invalid",
-    name: "浏览器合成账号",
-    password: "Synthetic-Browser-Only-2026!",
-  });
   server = serve({ fetch: host.fetch, hostname: "127.0.0.1", port: 18765 });
   server.on("error", async (error) => {
     console.error(error.message);

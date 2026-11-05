@@ -84,11 +84,13 @@ if [[ ! -f $ENV_FILE ]]; then
     printf 'FINDME_STATE_DIR=%s\nFINDME_PORT=%s\nFINDME_PUBLIC_URL=%s\n' "$STATE" "$PORT" "$PUBLIC_URL"
     printf 'POSTGRES_PASSWORD=%s\n' "$(random_hex)"
     for role in RUNTIME IDENTITY AUTH; do printf 'DB_%s_PASSWORD=%s\n' "$role" "$(random_hex)"; done
-    printf 'ACCOUNT_SECRET=%s\nOWNER_EMAIL=owner@findme.local\nOWNER_PASSWORD=%s\n' "$(random_hex)" "$(random_hex)"
+    printf 'ACCOUNT_SECRET=%s\n' "$(random_hex)"
     printf '# External database (optional): set both, e.g. DATABASE_LOCATION=host/db?sslmode=require\n'
     printf '# and DATABASE_ADMIN_URL=postgresql://owner:password@host/db?sslmode=require\n'
   } > "$ENV_FILE"
 fi
+# No sign-in: drop the former owner login from existing configuration.
+sed -i '/^OWNER_PASSWORD=/d;/^OWNER_EMAIL=/d' "$ENV_FILE"
 ADMIN_URL=$(get_value DATABASE_ADMIN_URL)
 "${SUDO[@]}" mkdir -p "$STATE/files"
 "${SUDO[@]}" chown 1000:1000 "$STATE/files"
@@ -111,5 +113,4 @@ echo '[deploy] Creating the database structure if empty and initializing the acc
 "${COMPOSE[@]}" up -d --wait --wait-timeout 120 app
 "${COMPOSE[@]}" exec -T app node -e 'for (const p of ["/", "/health?strict=1", "/ready"]) { const r=await fetch("http://127.0.0.1:8000"+p); if(!r.ok) throw Error(p+":"+r.status); } console.log("[deploy] Web, database, account role and worker ready")'
 printf '%s\n' "$COMMIT" > "$STATE/deployed-commit"
-printf '\nFindMe ready: %s\nAccount: owner@findme.local\nCredentials and runtime settings: %s\n' "$PUBLIC_URL" "$ENV_FILE"
-echo 'Read OWNER_PASSWORD from that file on the instance. Configure the model provider in the App settings.'
+printf '\nFindMe ready: %s (no sign-in)\nRuntime settings: %s\n' "$PUBLIC_URL" "$ENV_FILE"
