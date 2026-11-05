@@ -14,7 +14,7 @@ pnpm install --frozen-lockfile
 
 ## 应用直接运行的目标方式
 
-应用开发及后续部署直接运行源码或构建产物，不以 Docker 应用镜像作为前置；数据库容器和合成数据库测试独立保留。目标运行边界见 [TA](../ta.md)，运行脚本、进程管理和现有实例切换作为 [AG-06](../delivery/agent-work-plan.md)实施，未完成前不将容器部署命令改称直接运行命令。无需为纯文档或方法初稿启动本机 Docker。
+部署沿用现有单节点容器路径（[单节点部署](../../deployment/standalone/README.md)）。测试在 Instabox 实例上运行，本机不跑测试，见[测试计划](../delivery/phase-1-test-plan.md)。
 
 ## 无生产连接的开发与预览
 
@@ -39,6 +39,6 @@ VITE_CORE_API_BASE="" pnpm --filter @findme/app exec vite --host 0.0.0.0 --port 
 
 ## 本机开发配置
 
-仅在需要本机 API 的开发任务中，从根 `.env.example` 复制到忽略的 `.env`，填写本机开发库的 runtime/identity/auth 三个连接、`ACCOUNT_SECRET`、base URL 与 trusted origins；不复制实际节点的 `runtime.env`。空库先执行一次 `packages/db/schema.sql` 和 `packages/db/access/account-runtime.sql`，或直接用部署脚本在本机 Docker 中初始化。纯 `/diagnostic-preview` 不需要 `.env`、数据库或模型。
+仅在需要本机 API 的开发任务中，从根 `.env.example` 复制到忽略的 `.env`，填写本机开发库的 runtime/identity/auth 三个连接、`ACCOUNT_SECRET`、base URL 与 trusted origins；不复制实际节点的 `runtime.env`。空库先执行一次 `packages/db/schema.sql` 和 `packages/db/access/account-runtime.sql`，或直接在 Instabox 实例上用部署脚本初始化。纯 `/diagnostic-preview` 不需要 `.env`、数据库或模型。
 
 模型服务商、密钥与预算不在环境变量中，登录后在 App 的“模型设置”里填写并保存到数据库。测试用的 `DATABASE_URL_TEST` 由 `pnpm test:db` 生成，无需在日常 `.env` 保存测试凭据。

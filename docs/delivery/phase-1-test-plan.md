@@ -13,14 +13,13 @@
 | `pnpm test:browser:synthetic` | 构建正式 account React App，拦截合成 HTTP，检查桌面/移动交互；没有实际认证或持久化 |
 | `pnpm test:browser:real` | 同一 App 经 loopback createApp、真实 Better Auth cookie 与每视口新建临时 PostgreSQL；合成身份、邮件/推理关闭 |
 | `pnpm test:browser` | 上述两个浏览器组；不是生产部署验收 |
-| `pnpm test:browser:maintenance` | 仅保留 App native/private 检查，独立临时构建与模拟 HTTP，桌面/移动交互；旧 Web 检查随退役移除，包含于完整 test/CI |
 | `pnpm check:repo` | 已跟踪 Markdown/HTML/CSS/manifest 引用与锚点核对；不替代动态引用/业务检查 |
 | `pnpm test` | 不带筛选时串联 API local/db、App 单测、两组浏览器；无测试包列为未覆盖，不算空成功 |
 | `pnpm test:local framework-runtime` / `pnpm test:db knowledge-processing` | API 文件筛选，零匹配失败；筛选不执行 App/浏览器，不称全套通过 |
 | `pnpm test:coverage:local` / `pnpm test:coverage:db` | 对选定 API 组生成 V8 覆盖率报告，可附文件筛选；没有全局阈值，也不度量未选的浏览器/旧前端 |
 | `pnpm lint` / `pnpm --filter @findme/api exec tsc --noEmit` / `pnpm build` | 格式/静态检查、API 类型、workspace 构建；不是运行效用证明 |
 
-需先按锁文件安装依赖，使用 Node 24 / pnpm 9.15.9。数据库测试需要已经可用的 Docker daemon；macOS 可以使用既有 Colima，并通过 DOCKER_CONTEXT 选择专用实例。脚本不会自行安装或启动虚拟机，不改全局 context。浏览器还需 Chromium：`pnpm exec playwright install chromium`；Ubuntu CI 使用 `pnpm exec playwright install --with-deps chromium`。仅运行 fast/local/app 不需要 Docker 或浏览器；完整入口需要两者。CI 使用同一分组入口。
+测试在 Instabox 实例上运行，本机不跑测试：在实例上单独的测试目录按锁文件安装依赖（Node 22+ / pnpm 9.15.9），数据库测试使用实例上的 Docker，浏览器测试先运行 `pnpm exec playwright install --with-deps chromium`。仅运行 fast/local/app 不需要 Docker 或浏览器。
 
 执行器不加载仓库 .env，不继承数据库或模型配置；测试库、端口、账号文件由本次执行创建。数据库分类由 `scripts/test-config.mjs` 的清单和 `-postgres.test.ts` 后缀定义，新出现的测试必须归类。数据库缺失/迁移失败/角色错误在用例前停止；本机组不会将跳过数据库描述为全量通过。SIGINT/SIGTERM 和失败均执行自身资源清理；非正常杀进程、Docker daemon 不可达的清理结果须另核对，不能承诺必然清完。
 
@@ -36,7 +35,7 @@
 | 账号 App、多端与真实入口 / AC-01、09 | 类型/构建只能作为准备；已有正式 App 单测与两组桌面/移动浏览器；部署入口与手机/电脑本人连续使用仍需另验 |
 | 本人支持、建议、挑战与知识价值 / AC-06、07、09 | 固定真实案例及本人反馈；工程通过不代表回答正确、有效或分身已完成 |
 
-浏览器代码在 `apps/app/e2e/`，运行器为 `scripts/test-browser.mjs`；真实组在各视口重新建库以保留生产限流语义，不降低限流来使夹具通过。App native/private 保留 maintenance 浏览器组；正式 account 浏览器检查保持，含桌面与 390×844 移动视口。独立 Web 测试、Taro 专用测试和 H5/weapp 构建检查随客户端退役移除。这里说明套件范围，不预先宣称本轮测试或 CI 通过。知识、专项与归档分别有 `*-postgres.test.ts` 套件；执行器按后缀及显式清单归类。旧大型合成测试仍按真实范围解释。不开全局覆盖率或复杂度阈值，不要求全部存量重构。
+浏览器代码在 `apps/app/e2e/`，运行器为 `scripts/test-browser.mjs`；真实组在各视口重新建库以保留生产限流语义，不降低限流来使夹具通过。正式 account 浏览器检查保持，含桌面与 390×844 移动视口。独立 Web 测试、Taro 专用测试和 H5/weapp 构建检查随客户端退役移除。这里说明套件范围，不预先宣称本轮测试或 CI 通过。知识、专项与归档分别有 `*-postgres.test.ts` 套件；执行器按后缀及显式清单归类。旧大型合成测试仍按真实范围解释。不开全局覆盖率或复杂度阈值，不要求全部存量重构。
 
 ## 进入、退出与候选记录
 

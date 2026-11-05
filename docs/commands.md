@@ -58,7 +58,7 @@ pnpm test
 bash scripts/verify.sh
 ```
 
-`test:fast` 选择显式轻量组；`test:local` 运行无数据库 API 合成回归和执行器自身测试，两者无文件筛选时也运行 App 单测。`test:app` 单独运行 App 单测。它们不代表浏览器或数据库验证。`test:db` 使用已可用的 Docker daemon 创建本次专用 PostgreSQL、按 `packages/db/schema.sql` 建表并创建三类账号测试角色，运行后清理本次容器、卷与临时配置；不会自行启动 Colima 或更改全局 Docker context。可通过 `DOCKER_CONTEXT` 选择已启动的专用实例。
+`test:fast` 选择显式轻量组；`test:local` 运行无数据库 API 合成回归和执行器自身测试，两者无文件筛选时也运行 App 单测。`test:app` 单独运行 App 单测。它们不代表浏览器或数据库验证。`test:db` 在 Instabox 实例上使用其 Docker daemon 创建本次专用 PostgreSQL、按 `packages/db/schema.sql` 建表并创建三类账号测试角色，运行后清理本次容器、卷与临时配置；本机不跑测试。可通过 `DOCKER_CONTEXT` 选择已启动的专用实例。
 
 `test:browser` 包含 synthetic 拦截 HTTP 和 real cookie/Better Auth/每视口新临时库两组；先安装 Chromium（`pnpm exec playwright install chromium`；Ubuntu CI 加 `--with-deps`）。`check:repo` 检查已跟踪文档与静态资源引用，不改文件、不连接服务。coverage 入口只生成所选 API local/db 的 V8 报告，不设全局阈值。
 

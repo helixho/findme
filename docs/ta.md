@@ -6,7 +6,7 @@
 
 赛博分身是产品愿景，持续理解、可用的支持与建议、诚实挑战、知识引导及纠正后真实更新是技术需要满足的结果。第一阶段选择带 harness 的个人理解 Agent，方法论与质量标准以 skills 执行；具体职责见 [AA](aa.md) 与 [Agent 设计](implementation/personal-understanding-agent.md)。此方法蒸馏不等于人格蒸馏、微调或完整分身；这些未来形式尚未选定。后续具体方案按当时可用能力、效果、成本与实际缺口选择，现有实现不自动成为长期技术承诺。
 
-沿用现有 monorepo、TypeScript、React 19 + Vite 浏览器客户端、Hono API 与 Drizzle/PostgreSQL。个人理解任务通过 pi SDK 承载的 Agent 执行，既有模型适配按具体步骤复用；不另建 Agent 服务集群。运行方式保持单节点：应用直接运行源码或构建产物，由进程管理负责启动、停止、重启与就绪检查。应用 Docker 打包延后到确有分发需求时，不作为开发、CI 或功能验证前置；PostgreSQL 容器与应用打包独立，既有数据库无需因此迁移。现有容器脚本见[单节点部署](../deployment/standalone/README.md)，在直接运行路径完成并验证前保留，不把设计当作已切换。这里只说明拟复用的技术基础，不重复运行资源 ID、服务状态、模型版本或实时限额。
+沿用现有 monorepo、TypeScript、React 19 + Vite 浏览器客户端、Hono API 与 Drizzle/PostgreSQL。个人理解任务通过 pi SDK 承载的 Agent 执行，既有模型适配按具体步骤复用；不另建 Agent 服务集群。运行方式保持单节点，沿用现有容器部署；改为直接运行源码或构建产物须在出现具体问题时再评估（ADR D29）。应用 Docker 打包延后到确有分发需求时，不作为开发、CI 或功能验证前置；PostgreSQL 容器与应用打包独立，既有数据库无需因此迁移。部署脚本见[单节点部署](../deployment/standalone/README.md)。这里只说明拟复用的技术基础，不重复运行资源 ID、服务状态、模型版本或实时限额。
 
 正式产品默认是账号制云端服务，手机与电脑消费同一 Core API、对话、个人理解、证据和诊断状态。唯一客户端为 `apps/app` 浏览器单页应用（SPA），手机 H5 与桌面同代码，不是原生安装包。独立 `apps/web`、`apps/miniapp` 及 Taro 工具链按 [ADR D25](adr.md#d25-直接退役两个独立客户端统一使用-appsapp-浏览器入口) 退役，不以迁移全部旧功能为前置；App 自身 native/private/diagnostic-preview/dogfood 兼容分支保留。Android/Capacitor 包装工程与 APK 构建链已退役。AV/Codex CLI/本机查看器仅为可选采集和研究工具，不要求普通用户安装、登录开发工具或保持电脑在线。
 
@@ -106,7 +106,7 @@
 
 处理开始与发布前复核使用范围和输入版本。生成耗时期间发生纠正、排除或删除时，旧结果不能未经检查重新发布为当前。更新认识版本、标记被替代版本和安排视图失效应有可验证的一致性方案。
 
-第一阶段业务模块向 Agent 提交任务，不直接向 LLM 提交完整理解流程；Agent 通过可替换模型适配调用 Provider，客户端不拼私人人格 prompt。pi SDK 采用应用自有上下文、资源加载器和领域工具，关闭默认编码工作区资源的继承；具体版本和运行契约见[Agent 设计](implementation/personal-understanding-agent.md)。模型选择和上下文装配在对应方案中按当时能力确定，不能把某个当前 provider 固化为赛博分身的定义。采用结构校验、引用校验、语义质量检查及可降级输出；模型自评 confidence 只作元数据。结构化测评的确定性分数独立于模型输出；角色、规则、内容和 prompt 的版本必须能还原实际使用内容，不能仅有一个无法解析的版本字符串。
+Agent 是待对照验证的候选实现：按[工作计划](delivery/agent-work-plan.md)通过 AG-04 质量对照后才替换现有处理链路，没有增益时保留现有链路。采用时，Agent 通过可替换模型适配调用 Provider，客户端不拼私人人格 prompt。pi SDK 采用应用自有上下文、资源加载器和领域工具，关闭默认编码工作区资源的继承；具体版本和运行契约见[Agent 设计](implementation/personal-understanding-agent.md)。模型选择和上下文装配在对应方案中按当时能力确定，不能把某个当前 provider 固化为赛博分身的定义。采用结构校验、引用校验、语义质量检查及可降级输出；模型自评 confidence 只作元数据。结构化测评的确定性分数独立于模型输出；角色、规则、内容和 prompt 的版本必须能还原实际使用内容，不能仅有一个无法解析的版本字符串。
 
 ### 认识推理分级与决策血缘
 
