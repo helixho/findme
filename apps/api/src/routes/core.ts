@@ -116,6 +116,7 @@ const AmendBody = z.object({
 const ExplorationListQuery = z.object({
   status: z.enum(["active", "completed", "abandoned"]).optional(),
   limit: z.coerce.number().int().min(1).max(50).optional(),
+  offset: z.coerce.number().int().min(0).optional(),
 });
 
 const SourceAssessmentBody = z.object({

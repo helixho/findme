@@ -7,6 +7,8 @@ export const StartExplorationInput = z.object({
   occurred_at: z.string().datetime({ offset: true }).optional(),
   occurred_label: z.string().max(120).optional(),
   report_target: CoreReportTarget.optional(),
+  /** Answer this first message directly before any exploration (daily use). */
+  reply_first: z.boolean().optional(),
 });
 export type StartExplorationInput = z.infer<typeof StartExplorationInput>;
 

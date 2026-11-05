@@ -55,10 +55,17 @@ test("real logout completes when the selected Profile changes while the request 
   const previous = await page.evaluate(() => sessionStorage.getItem("findme_cloud:profile"));
   expect(previous).toBeTruthy();
   const profileName = `并发退出资料-${crypto.randomUUID().slice(0, 8)}`;
-  await page.getByText("管理个人 Profile", { exact: true }).click();
-  page.once("dialog", (d) => d.accept(profileName));
-  await page.getByRole("button", { name: "创建独立 Profile" }).click();
-  await expect(page.getByText(`${profileName} · active`, { exact: true })).toBeVisible();
+  // The App no longer manages Profiles; a second one is created through the API.
+  const created = await browserApi(
+    page,
+    "/api/profiles",
+    { name: profileName },
+    crypto.randomUUID(),
+  );
+  expect(created.status).toBe(201);
+  await page.reload();
+  await page.getByText("浏览器合成账号", { exact: true }).click();
+  await page.getByLabel("切换个人资料").selectOption(String(created.body.id));
   let release!: () => void;
   let started = false;
   const held = new Promise<void>((resolve) => {
@@ -98,35 +105,6 @@ test("real account API rejects an untrusted Origin with valid browser cookies", 
   expect((await response.json()).error.code).toBe("ACCOUNT_ORIGIN_REQUIRED");
   const list = await browserApi(page, "/api/profiles");
   expect(list.body.some((p: { name: string }) => p.name === "must-not-exist")).toBe(false);
-});
-
-test("real Profile creation, archive and restore persist through browser refresh", async ({
-  page,
-}) => {
-  const profileName = `浏览器独立资料-${crypto.randomUUID().slice(0, 8)}`;
-  await login(page);
-  await page.getByText("管理个人 Profile", { exact: true }).click();
-  page.once("dialog", (d) => d.accept(profileName));
-  await page.getByRole("button", { name: "创建独立 Profile" }).click();
-  await expect(page.getByText(`${profileName} · active`, { exact: true })).toBeVisible();
-  const row = page.locator(".cloud-profile-admin > div").filter({ hasText: profileName });
-  page.once("dialog", (d) => d.accept());
-  await row.getByRole("button", { name: "归档", exact: true }).click();
-  await expect(
-    row.getByRole("button", { name: "恢复", exact: true, includeHidden: true }),
-  ).toHaveCount(1);
-  if ((await page.locator(".cloud-profile-admin").getAttribute("open")) === null)
-    await page.getByText("管理个人 Profile", { exact: true }).click();
-  await expect(page.getByText(`${profileName} · archived`, { exact: true })).toBeVisible();
-  page.once("dialog", (d) => d.accept());
-  await row.getByRole("button", { name: "恢复", exact: true }).click();
-  await expect(page.getByText(`${profileName} · active`, { exact: true })).toHaveCount(1);
-  if ((await page.locator(".cloud-profile-admin").getAttribute("open")) === null)
-    await page.getByText("管理个人 Profile", { exact: true }).click();
-  await expect(page.getByText(`${profileName} · active`, { exact: true })).toBeVisible();
-  await page.reload();
-  await page.getByText("管理个人 Profile", { exact: true }).click();
-  await expect(page.getByText(`${profileName} · active`, { exact: true })).toBeVisible();
 });
 
 test("real response/source save, idempotent replay, version conflict and refresh persistence", async ({

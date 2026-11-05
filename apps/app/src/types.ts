@@ -81,6 +81,8 @@ export type StartResponse = {
     last_activity_at?: string;
   };
   experience: { id: string; summary: string };
+  /** Present when the first message is answered before exploring. */
+  event_source_id?: string;
   phase: "ready_to_plan";
   saved: true;
 };

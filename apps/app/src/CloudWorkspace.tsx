@@ -19,7 +19,7 @@ import { CloudReadingHome } from "./cloud/CloudReadingHome";
 import { ConversationView } from "./cloud/ConversationView";
 import { DataPanel } from "./cloud/DataPanel";
 import { type ReportPane, RunDetail } from "./cloud/RunDetail";
-import { SettingsPanel } from "./cloud/SettingsPanel";
+import { UnderstandingList } from "./cloud/UnderstandingList";
 import { type Profile, type Run, type Session, message } from "./cloud/shared";
 import "./cloud-workspace.css";
 
@@ -36,11 +36,11 @@ export default function CloudWorkspace() {
     | "talk"
     | "topics"
     | "history"
+    | "understanding"
     | "knowledge"
     | "support"
     | "perspective"
     | "data"
-    | "settings"
     | "frameworks"
   >("home");
   const [selectedRun, setSelectedRun] = useState<string | null>(null);
@@ -208,7 +208,7 @@ export default function CloudWorkspace() {
             ["home", "首页", Home],
             ["talk", "对话", MessageCircle],
             ["topics", "专题阅读", BookOpenText],
-            ["history", "纠正与修订", History],
+            ["understanding", "全部认识", History],
           ] as const
         ).map(([key, title, Icon]) => (
           <button
@@ -250,10 +250,19 @@ export default function CloudWorkspace() {
         {view === "talk" && profile && (
           <ConversationView key={`${profile}:${talkTarget ?? ""}`} resumeId={talkTarget} />
         )}
+        {view === "understanding" && profile && (
+          <UnderstandingList
+            key={profile}
+            onTalk={(id) => {
+              setTalkTarget(id);
+              setView("talk");
+              window.scrollTo({ top: 0, behavior: "instant" });
+            }}
+          />
+        )}
         {view === "support" && profile && <SpecialistView key={profile} />}
         {view === "perspective" && profile && <PerspectiveView key={profile} />}
         {view === "data" && profile && <DataPanel key={profile} />}
-        {view === "settings" && <SettingsPanel />}
         {(["home", "topics", "history"] as string[]).includes(view) &&
           (selectedRun ? (
             <RunDetail
@@ -341,7 +350,6 @@ export default function CloudWorkspace() {
                 ["support", "具体困难与尝试"],
                 ["perspective", "作品视角"],
                 ["data", "我的资料"],
-                ["settings", "模型设置"],
               ] as const
             ).map(([key, title]) => (
               <button
@@ -357,83 +365,6 @@ export default function CloudWorkspace() {
               </button>
             ))}
           </nav>
-        </details>
-        <details className="cloud-profile-admin">
-          <summary>管理个人 Profile</summary>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() =>
-              void action(async () => {
-                const name = window.prompt("新 Profile 名称：");
-                if (!name) return;
-                const created = await cloudMutation<Profile>(
-                  "/api/profiles",
-                  { name },
-                  "POST",
-                  false,
-                );
-                setProfiles(await cloudRequest("/api/profiles", {}, false));
-                switchProfile(created.id);
-              })
-            }
-          >
-            创建独立 Profile
-          </button>
-          {profiles.map((p) => (
-            <div key={p.id}>
-              <span>
-                {p.name ?? "我的资料"} · {p.status}
-              </span>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() =>
-                  void action(async () => {
-                    const name = window.prompt("修改名称：", p.name ?? "");
-                    if (!name) return;
-                    await cloudMutation(
-                      `/api/profiles/${p.id}`,
-                      { expected_version: p.version, name },
-                      "PATCH",
-                      false,
-                    );
-                    setProfiles(await cloudRequest("/api/profiles", {}, false));
-                  })
-                }
-              >
-                改名
-              </button>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() =>
-                  void action(async () => {
-                    if (
-                      !window.confirm(
-                        p.status === "active"
-                          ? "归档此 Profile 并停止排队中的处理？资料不会删除。"
-                          : "恢复此 Profile？不会自动恢复模型任务。",
-                      )
-                    )
-                      return;
-                    await cloudMutation(
-                      `/api/profiles/${p.id}`,
-                      {
-                        expected_version: p.version,
-                        status: p.status === "active" ? "archived" : "active",
-                      },
-                      "PATCH",
-                      false,
-                    );
-                    await refreshSession();
-                  })
-                }
-              >
-                {p.status === "active" ? "归档" : "恢复"}
-              </button>
-            </div>
-          ))}
         </details>
       </main>
     </div>

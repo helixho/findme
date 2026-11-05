@@ -7,12 +7,6 @@ export function DataPanel() {
   const [busy, setBusy] = useState(false);
   const [sources, setSources] = useState<Source[]>([]);
   const [cursor, setCursor] = useState<number | null>(0);
-  const [preview, setPreview] = useState<{
-    id: string;
-    input_hash: string;
-    items: unknown[];
-    holdout_omitted: number;
-  } | null>(null);
   const [blobs, setBlobs] = useState<
     { id: string; status: string; media_type: string; byte_length: number }[]
   >([]);
@@ -67,10 +61,7 @@ export function DataPanel() {
   return (
     <section>
       <h2>我的资料</h2>
-      <p>
-        普通文件导入只保存来源与候选；已通过的 U2
-        专题须走下方固定归档的一次性导入。排除可恢复，删除原文不可撤回。
-      </p>
+      <p>这里是参与形成理解的原话和文件。“不再用于分析”可以恢复，删除原文不可撤回。</p>
       {error && (
         <p role="alert" className="form-error">
           {error}
@@ -84,80 +75,6 @@ export function DataPanel() {
           导出完整结构化数据包
         </button>
       </div>
-      <section className="home-section">
-        <h3>导入来源</h3>
-        <label>
-          选择导入包、精确证据包或个人导出文件
-          <input
-            type="file"
-            accept="application/json"
-            disabled={busy}
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file)
-                void action(async () => {
-                  if (file.size > 2 * 1024 * 1024) throw new Error("请按每批不超过2MB分批导入");
-                  const raw = JSON.parse(await file.text());
-                  if (
-                    raw.format === "diagnostic-evidence-packet@1" ||
-                    raw.format === "findme-personal-export@1"
-                  ) {
-                    const namespace = window.prompt(
-                      "导入命名空间（用于稳定去重）：",
-                      "personal-import",
-                    );
-                    if (!namespace) return;
-                    const prepared = await cloudMutation<{ chunks: unknown[] }>(
-                      raw.format === "diagnostic-evidence-packet@1"
-                        ? "/api/data/imports/prepare"
-                        : "/api/data/imports/restore-prepare",
-                      raw.format === "diagnostic-evidence-packet@1"
-                        ? { namespace, packet: raw }
-                        : { namespace, export: raw },
-                    );
-                    if (prepared.chunks.length !== 1) {
-                      prepared.chunks.forEach((chunk, index) =>
-                        jsonDownload(`findme-import-${index + 1}.json`, chunk),
-                      );
-                      throw new Error(
-                        `已生成 ${prepared.chunks.length} 个导入分片，请逐个预览后提交。`,
-                      );
-                    }
-                    setPreview(
-                      await cloudMutation("/api/data/imports/preview", prepared.chunks[0]),
-                    );
-                  } else setPreview(await cloudMutation("/api/data/imports/preview", raw));
-                });
-            }}
-          />
-        </label>
-        {preview && (
-          <div>
-            <p>
-              预览项目 {preview.items.length} 条；留出资料略过 {preview.holdout_omitted} 条。
-            </p>
-            <pre>{JSON.stringify(preview.items, null, 2)}</pre>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() =>
-                void action(async () => {
-                  if (!window.confirm("确认将本次预览中的来源保存到当前 Profile？不调用模型。"))
-                    return;
-                  await cloudMutation(`/api/data/imports/${preview.id}/commit`, {
-                    input_hash: preview.input_hash,
-                    confirm: true,
-                  });
-                  setPreview(null);
-                  await reload();
-                })
-              }
-            >
-              确认本批导入
-            </button>
-          </div>
-        )}
-      </section>
       <section>
         <h3>来源与使用状态</h3>
         {sources.map((s) => (
@@ -223,25 +140,6 @@ export function DataPanel() {
                     disabled={busy}
                     onClick={() =>
                       void action(async () => {
-                        const replacement = window.prompt(
-                          "输入当前 Profile 中已保存的替代来源 ID：",
-                        );
-                        if (!replacement) return;
-                        await cloudMutation(`/api/data/sources/${s.id}/rebind`, {
-                          expected_hash: s.hash,
-                          replacement_source_id: replacement,
-                        });
-                        await reload();
-                      })
-                    }
-                  >
-                    重绑替代来源
-                  </button>
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() =>
-                      void action(async () => {
                         if (
                           !window.confirm(
                             s.source_kind === "u2_quote_excerpt"
@@ -265,7 +163,6 @@ export function DataPanel() {
                 </>
               )}
             </div>
-            <small>来源 ID：{s.id}</small>
           </article>
         ))}
         {cursor !== null && (

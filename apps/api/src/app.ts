@@ -21,7 +21,6 @@ import { contentRoutes } from "./routes/content.js";
 import { coreRoutes } from "./routes/core.js";
 import { knowledgeRoutes } from "./routes/knowledge.js";
 import { specialistRoutes } from "./routes/specialist.js";
-import { settingsRoutes } from "./standalone/settings.js";
 
 type LlmGateway = Pick<ReturnType<typeof createGateway>, "extract" | "chat" | "describe">;
 export type AuthOpts = {
@@ -40,7 +39,6 @@ export function createApp(opts: {
   /** Automatic Core processing; absent or 0 keeps those endpoints off. */
   coreModel?: { dailyOperationLimit: number };
   /** Called after the model settings change so the runtime can reload them. */
-  onSettingsChange?: () => Promise<void>;
 }) {
   const app = new Hono();
   app.onError(onError);
@@ -74,7 +72,6 @@ export function createApp(opts: {
   api.use("*", account.middleware);
   // Shared, versioned method content; protected by the account session middleware above.
   api.route("/content", contentRoutes());
-  api.route("/settings", settingsRoutes(opts.db, opts.onSettingsChange ?? (async () => {})));
 
   const cloud = opts.cloud;
   const principal = account.principal;

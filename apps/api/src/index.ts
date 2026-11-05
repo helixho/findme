@@ -68,7 +68,6 @@ async function build() {
       trustedOrigins: authConfig.trustedOrigins,
       handler: (request) => account.auth.handler(request),
     },
-    onSettingsChange: reload,
   });
   app.get("/ready", async (c) => {
     const [result] = await db.execute<{ allowed: boolean }>(accountRuntimeRoleQuery);
@@ -90,12 +89,8 @@ async function build() {
   return { app, worker };
 }
 
-let current = await build();
-async function reload() {
-  const previous = current;
-  current = await build();
-  await previous.worker.stop();
-}
+// Model settings are deployment configuration, read once at start (restart to apply).
+const current = await build();
 
 const server = serve({
   fetch: (request) => current.app.fetch(request),

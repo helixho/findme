@@ -215,9 +215,10 @@ export async function getExplorationView(db: Db, ctx: PersonalContext, explorati
 export async function listExplorations(
   db: Db,
   ctx: PersonalContext,
-  args: { status?: "active" | "completed" | "abandoned"; limit?: number } = {},
+  args: { status?: "active" | "completed" | "abandoned"; limit?: number; offset?: number } = {},
 ) {
   const limit = Math.max(1, Math.min(args.limit ?? 20, 50));
+  const offset = Math.max(0, args.offset ?? 0);
   const rows = await db
     .select({
       id: coreSchema.explorations.id,
@@ -243,7 +244,8 @@ export async function listExplorations(
       ),
     )
     .orderBy(desc(coreSchema.explorations.lastActivityAt))
-    .limit(limit);
+    .limit(limit)
+    .offset(offset);
 
   const items = [];
   for (const row of rows) {

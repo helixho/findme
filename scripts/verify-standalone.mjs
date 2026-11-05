@@ -57,8 +57,6 @@ cookie = login.headers
   .map((value) => value.split(";")[0])
   .join("; ");
 assert(cookie);
-const model = await (await request("/api/settings/model")).json();
-assert.equal(model.enabled, false, "Verification requires model calls disabled");
 await request("/api/not-a-route", "GET", undefined, 404);
 let saved;
 if (process.argv[2] === "verify") {

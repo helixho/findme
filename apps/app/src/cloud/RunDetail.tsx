@@ -381,13 +381,8 @@ export function RunDetail({
       source_ids: string[];
       estimated_input_bytes: number;
     }>(`/api/diagnostics/${run.id}/process/plan`, body);
-    if (!plan.enabled) throw new Error("服务端尚未启用付费处理；已保存的回应保持不变。");
-    if (
-      !window.confirm(
-        `处理目的：核验选定原文、生成报告与独立审核。\nProvider：DeepSeek / ${plan.model}\n最多 ${plan.required_calls} 次请求；失败不自动重试。\nProfile 剩余 ${plan.remaining_profile_calls} 次；费用按实际用量计。确认处理？`,
-      )
-    )
-      return;
+    // The service budgets model use; the owner only asks for a new version.
+    if (!plan.enabled) throw new Error("报告处理暂不可用，已保存的回应保持不变。");
     await cloudMutation(`/api/diagnostics/${run.id}/process`, {
       ...body,
       provider_call_cap: plan.required_calls,
@@ -629,7 +624,7 @@ export function RunDetail({
             </section>
             <section>
               <h3>当前不会启动分析</h3>
-              <p>需要处理时，仍通过现有入口查看用途、调用范围与费用，再明确确认。</p>
+              <p>需要新的报告版本时，在“修订记录”里点“生成新的报告版本”。</p>
             </section>
           </aside>
         </div>
@@ -730,7 +725,7 @@ export function RunDetail({
           </section>
           <details>
             <summary>继续处理与历史材料</summary>
-            <p>保存回应不自动调用模型。以下处理仍须单独确认范围与费用。</p>
+            <p>保存回应不会自动生成新报告；需要时点下面的按钮。</p>
             <details>
               <summary>选择历史材料与专题依据</summary>
               {run.report_origin?.kind === "u2_approved_import" && (
@@ -798,16 +793,14 @@ export function RunDetail({
               disabled={busy || jobs.some((j) => j.status === "running" || j.status === "queued")}
               onClick={() => void action(process)}
             >
-              查看本次调用范围并确认处理
+              生成新的报告版本
             </button>
           </details>
           <section>
             <h3>处理任务</h3>
             {jobs.map((j) => (
               <article key={j.id}>
-                <p>
-                  {labels[j.status] ?? j.status} · {j.stage} · 请求 {j.calls_used}/{j.call_cap}
-                </p>
+                <p>{labels[j.status] ?? j.status}</p>
                 {j.error && <small>{j.error}</small>}
                 <div className="cloud-actions">
                   {["queued", "running"].includes(j.status) && (
@@ -830,20 +823,9 @@ export function RunDetail({
                       disabled={busy}
                       onClick={() =>
                         void action(async () => {
-                          const entered = window.prompt(
-                            `显式恢复：已用 ${j.calls_used} 次。输入此任务新的累计上限（最多20），不会清零用量。`,
-                            String(j.call_cap),
-                          );
-                          if (entered === null) return;
-                          const cap = Number(entered);
-                          if (!Number.isSafeInteger(cap) || cap < j.calls_used || cap > 20)
-                            throw new Error("调用上限无效");
-                          if (
-                            !window.confirm(
-                              `继续使用 DeepSeek，最多新增 ${cap - j.calls_used} 次请求；确认恢复？`,
-                            )
-                          )
-                            return;
+                          // Another round within the service limits; the server
+                          // enforces the profile budget and never resets usage.
+                          const cap = Math.min(20, j.calls_used + Math.max(1, j.call_cap));
                           await cloudMutation(`/api/diagnostics/jobs/${j.id}/resume`, {
                             provider_call_cap: cap,
                           });
@@ -851,7 +833,7 @@ export function RunDetail({
                         })
                       }
                     >
-                      显式恢复
+                      继续处理
                     </button>
                   )}
                 </div>

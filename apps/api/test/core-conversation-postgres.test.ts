@@ -493,4 +493,44 @@ dbDescribe("Core conversation continuity (AG-07a)", () => {
     ).toBe(true);
     expect(after.pending.messages).toHaveLength(1);
   });
+
+  it("answers a new topic first, before any exploration", async () => {
+    const started = await ok("/api/core/explorations", {
+      event: "帮我比较一下这两个选择。",
+      reply_first: true,
+    });
+    const id = started.exploration.id;
+    expect(started.event_source_id).toBeTruthy();
+    expect((await view(id)).pending.messages).toHaveLength(1);
+    const reply = await ok(`/api/core/explorations/${id}/reply`, {
+      expected_version: started.exploration.version,
+      message_source_id: started.event_source_id,
+    });
+    expect(reply.reply).toBeTruthy();
+    const after = await view(id);
+    expect(after.pending.messages).toEqual([]);
+    expect(after.questions).toEqual([]);
+  });
+
+  it("pages finished conversations", async () => {
+    for (const n of [1, 2, 3]) {
+      const s = await ok("/api/core/explorations", { event: `第${n}件事。` });
+      await ok(`/api/core/explorations/${s.exploration.id}/complete`, {
+        expected_version: s.exploration.version,
+      });
+    }
+    const page = async (offset: number) =>
+      (
+        await (
+          await app.request(`/api/core/explorations?status=completed&limit=2&offset=${offset}`, {
+            headers,
+          })
+        ).json()
+      ).items as Array<{ id: string }>;
+    const first = await page(0);
+    const second = await page(2);
+    expect(first).toHaveLength(2);
+    expect(second).toHaveLength(1);
+    expect(first.map((i) => i.id)).not.toContain(second[0]?.id);
+  });
 });

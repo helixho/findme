@@ -711,7 +711,7 @@ export async function loadPendingInputs(
         eq(coreSchema.explorationTurns.explorationId, explorationId),
         eq(coreSchema.sourceItems.tenantId, ctx.tenantId),
         eq(coreSchema.sourceItems.subjectId, ctx.subjectId),
-        inArray(coreSchema.explorationTurns.turnKind, ["correction", "message"]),
+        inArray(coreSchema.explorationTurns.turnKind, ["event", "correction", "message"]),
       ),
     )
     .orderBy(coreSchema.sourceItems.capturedAt);

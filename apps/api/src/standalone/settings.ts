@@ -1,6 +1,5 @@
 import { type Db, schema } from "@findme/db";
 import { eq, sql } from "drizzle-orm";
-import { Hono } from "hono";
 import { z } from "zod";
 
 /** Model provider and budgets, edited in the App and stored as plain app settings in the database. */
@@ -54,20 +53,4 @@ export async function writeModelSettings(db: Db, input: unknown): Promise<ModelS
       set: { value: next, updatedAt: sql`now()` },
     });
   return next;
-}
-
-/** The key never leaves the server; the App only learns whether one is stored. */
-export function publicModelSettings({ apiKey, ...rest }: ModelSettings) {
-  return { ...rest, apiKeyConfigured: apiKey.length > 0 };
-}
-
-export function settingsRoutes(db: Db, onChange: () => Promise<void>) {
-  const r = new Hono();
-  r.get("/model", async (c) => c.json(publicModelSettings(await readModelSettings(db))));
-  r.put("/model", async (c) => {
-    const saved = await writeModelSettings(db, await c.req.json());
-    await onChange();
-    return c.json(publicModelSettings(saved));
-  });
-  return r;
 }

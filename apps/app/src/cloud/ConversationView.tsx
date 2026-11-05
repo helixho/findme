@@ -80,7 +80,14 @@ const CORRECTION_TYPES = [
   ["not_mine", "不是我的表达"],
   ["other", "其他"],
 ] as const;
-const THREAD_KINDS = new Set(["message", "reply", "correction", "stop_using"]);
+// The whole saved conversation: first input, questions and answers, follow-ups,
+// replies, corrections. Redacted (deleted) turns are left out.
+const THREAD_LABEL: Record<string, string> = {
+  correction: "我的纠正",
+  stop_using: "我要求停用",
+  amendment: "我的更正",
+};
+const FINISHED_PAGE = 20;
 
 function explain(error: unknown) {
   if (error instanceof CloudApiError) {
@@ -99,6 +106,8 @@ export function ConversationView({ resumeId }: { resumeId?: string | null } = {}
   const [current, setCurrent] = useState<CurrentUnderstandingResponse | null>(null);
   const [open, setOpen] = useState<ExplorationSummary[]>([]);
   const [recent, setRecent] = useState<ExplorationSummary[]>([]);
+  const [recentMore, setRecentMore] = useState(false);
+  const [search, setSearch] = useState("");
   const [step, setStep] = useState<Step>({ kind: "compose" });
   const [event, setEvent] = useState("");
   const [answer, setAnswer] = useState("");
@@ -118,13 +127,16 @@ export function ConversationView({ resumeId }: { resumeId?: string | null } = {}
     const [s, c, active, completed] = await Promise.all([
       cloudRequest<CoreModelStatus>("/api/core/model-status"),
       cloudRequest<CurrentUnderstandingResponse>("/api/core/understanding"),
-      cloudRequest<ExplorationListResponse>("/api/core/explorations?status=active&limit=10"),
-      cloudRequest<ExplorationListResponse>("/api/core/explorations?status=completed&limit=3"),
+      cloudRequest<ExplorationListResponse>("/api/core/explorations?status=active&limit=50"),
+      cloudRequest<ExplorationListResponse>(
+        `/api/core/explorations?status=completed&limit=${FINISHED_PAGE}`,
+      ),
     ]);
     setStatus(s);
     setCurrent(c);
     setOpen([...active.items].sort((a, b) => Number(!!a.parked) - Number(!!b.parked)));
     setRecent(completed.items);
+    setRecentMore(completed.items.length === FINISHED_PAGE);
   }, []);
 
   async function run(fn: () => Promise<void>) {
@@ -357,21 +369,44 @@ export function ConversationView({ resumeId }: { resumeId?: string | null } = {}
           )}
           {recent.length > 0 && (
             <details className="fm-secondary-nav">
-              <summary>最近结束的事</summary>
+              <summary>已经结束的事</summary>
+              <label>
+                查找
+                <input value={search} onChange={(e) => setSearch(e.target.value)} />
+              </label>
               <ul>
-                {recent.map((item) => (
-                  <li key={item.id}>
-                    {item.summary.slice(0, 60)}{" "}
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => void run(() => resume(item.id, false))}
-                    >
-                      接着聊
-                    </button>
-                  </li>
-                ))}
+                {recent
+                  .filter((item) => !search.trim() || item.summary.includes(search.trim()))
+                  .map((item) => (
+                    <li key={item.id}>
+                      {item.summary.slice(0, 60)}{" "}
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => void run(() => resume(item.id, false))}
+                      >
+                        接着聊
+                      </button>
+                    </li>
+                  ))}
               </ul>
+              {recentMore && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() =>
+                    void run(async () => {
+                      const next = await cloudRequest<ExplorationListResponse>(
+                        `/api/core/explorations?status=completed&limit=${FINISHED_PAGE}&offset=${recent.length}`,
+                      );
+                      setRecent((all) => [...all, ...next.items]);
+                      setRecentMore(next.items.length === FINISHED_PAGE);
+                    })
+                  }
+                >
+                  显示更多
+                </button>
+              )}
             </details>
           )}
           {!current?.claims.length && (
@@ -401,9 +436,18 @@ export function ConversationView({ resumeId }: { resumeId?: string | null } = {}
               void run(async () => {
                 const started = await cloudMutation<StartResponse>("/api/core/explorations", {
                   event: event.trim(),
+                  reply_first: true,
                 });
                 setEvent("");
-                await proceed(started.exploration.id, started.exploration.version);
+                // Answer the request first; exploration follows only when the
+                // message brings facts worth adding to the understanding.
+                if (started.event_source_id)
+                  await respond(
+                    started.exploration.id,
+                    started.exploration.version,
+                    started.event_source_id,
+                  );
+                else await proceed(started.exploration.id, started.exploration.version);
               })
             }
           >
@@ -688,18 +732,11 @@ export function ConversationView({ resumeId }: { resumeId?: string | null } = {}
           <div className="conversation-thread">
             <h3>接着聊这件事</h3>
             {(step.data.view?.turns ?? [])
-              .filter((turn) => THREAD_KINDS.has(turn.turnKind))
+              .filter((turn) => turn.content)
               .map((turn) => (
                 <p key={turn.id} className={turn.role === "user" ? "thread-user" : "thread-reply"}>
                   <span className="muted">
-                    {turn.role === "user"
-                      ? turn.turnKind === "correction"
-                        ? "我的纠正"
-                        : turn.turnKind === "stop_using"
-                          ? "我要求停用"
-                          : "我"
-                      : "FindMe"}
-                    ：
+                    {turn.role === "user" ? (THREAD_LABEL[turn.turnKind] ?? "我") : "FindMe"}：
                   </span>
                   {turn.content}
                 </p>
@@ -820,13 +857,15 @@ function Finish(props: {
 
 /** Read-only conversation log of a matter. */
 function ThreadLog({ view }: { view: ExplorationView }) {
-  const turns = (view.turns ?? []).filter((turn) => THREAD_KINDS.has(turn.turnKind));
+  const turns = (view.turns ?? []).filter((turn) => turn.content);
   if (!turns.length) return null;
   return (
     <div className="conversation-thread">
       {turns.map((turn) => (
         <p key={turn.id} className={turn.role === "user" ? "thread-user" : "thread-reply"}>
-          <span className="muted">{turn.role === "user" ? "我" : "FindMe"}：</span>
+          <span className="muted">
+            {turn.role === "user" ? (THREAD_LABEL[turn.turnKind] ?? "我") : "FindMe"}：
+          </span>
           {turn.content}
         </p>
       ))}

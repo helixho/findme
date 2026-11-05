@@ -83,6 +83,18 @@ export async function startExploration(
       turnKind: "event",
       content: parsed.event,
     });
+    // Daily use answers the request first; exploration follows only as needed.
+    if (parsed.reply_first)
+      await tx
+        .update(coreSchema.sourceItems)
+        .set({
+          sourceMeta: {
+            ...(source.sourceMeta ?? {}),
+            exploration_id: exploration.id,
+            reply_status: "pending",
+          },
+        })
+        .where(eq(coreSchema.sourceItems.id, source.id));
 
     const response = jsonObject({
       exploration: {
@@ -93,6 +105,7 @@ export async function startExploration(
         last_activity_at: exploration.lastActivityAt,
       },
       experience: { id: experience.id, summary: experience.summary },
+      event_source_id: source.id,
       phase: "ready_to_plan",
       ...(validatedReportTarget ? { report_target: validatedReportTarget } : {}),
       saved: true,
