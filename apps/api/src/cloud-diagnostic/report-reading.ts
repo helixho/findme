@@ -244,6 +244,8 @@ export async function readReport(db: Db, ctx: PersonalContext, id: string) {
       ...runView(run),
       report: null as UnderstandingReport | null,
       report_revision_id: head?.id ?? null,
+      /** When this report revision was generated; unlike the run, it never moves. */
+      report_created_at: head?.createdAt ?? null,
       report_status: head?.status ?? "unavailable",
       report_origin: await importedReportOrigin(tx, ctx, run, head),
     };

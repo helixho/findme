@@ -1,6 +1,6 @@
 import { CorrectionInput } from "@findme/core";
 import { type Db, coreSchema } from "@findme/db";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { PURPOSEFUL_EXPLORATION_POLICY, inputFingerprint } from "./epistemic-policy.js";
 import { CoreError } from "./errors.js";
@@ -68,6 +68,43 @@ export type ConversationReplyDraft = z.infer<typeof ConversationReplyDraft>;
 
 type SourceMeta = Record<string, unknown>;
 
+/**
+ * Version step for owner input on a matter that may be finished: the input
+ * reopens it (status active), guarded by the expected version.
+ */
+async function reopenAndBump(
+  tx: Db,
+  ctx: PersonalContext,
+  exploration: { id: string; ext: unknown },
+  expectedVersion: number,
+  unpark: boolean,
+) {
+  const ext = (exploration.ext ?? {}) as Record<string, unknown>;
+  const [updated] = await tx
+    .update(coreSchema.explorations)
+    .set({
+      version: expectedVersion + 1,
+      status: "active",
+      completedAt: null,
+      lastActivityAt: new Date(),
+      ...(unpark ? { ext: { ...ext, parked: false } } : {}),
+    })
+    .where(
+      and(
+        eq(coreSchema.explorations.id, exploration.id),
+        eq(coreSchema.explorations.tenantId, ctx.tenantId),
+        eq(coreSchema.explorations.subjectId, ctx.subjectId),
+        eq(coreSchema.explorations.version, expectedVersion),
+      ),
+    )
+    .returning({ version: coreSchema.explorations.version });
+  if (!updated)
+    throw new CoreError("STALE_VERSION", 409, "探索已经发生变化", {
+      current_version: (await loadExploration(tx, ctx, exploration.id)).version,
+    });
+  return updated.version;
+}
+
 /** Saved correction: kept as the owner's words even when processing later fails. */
 export async function saveCorrectionTx(
   tx: Db,
@@ -99,7 +136,8 @@ export async function saveCorrectionTx(
   )
     throw new CoreError("STALE_CLAIM_REVISION", 409, "认识版本已经发生变化");
 
-  const nextVersion = await bumpExplorationVersion(tx, ctx, exploration.id, input.expected_version);
+  // A finished matter shown again can be corrected directly; the input reopens it.
+  const nextVersion = await reopenAndBump(tx, ctx, exploration, input.expected_version, false);
   const { source, span } = await createSource(tx, ctx, {
     kind: "guided_response",
     content: input.correction.note,
@@ -177,29 +215,13 @@ export async function saveExplorationMessage(
     throw new CoreError("QUESTION_NOT_OPEN", 409, "当前还有一个待回答的问题");
 
   return db.transaction(async (tx) => {
-    const now = new Date();
-    const [updated] = await tx
-      .update(coreSchema.explorations)
-      .set({
-        version: parsed.expected_version + 1,
-        status: "active",
-        completedAt: null,
-        lastActivityAt: now,
-        ext: { ...(exploration.ext ?? {}), parked: false },
-      })
-      .where(
-        and(
-          eq(coreSchema.explorations.id, exploration.id),
-          eq(coreSchema.explorations.tenantId, ctx.tenantId),
-          eq(coreSchema.explorations.subjectId, ctx.subjectId),
-          eq(coreSchema.explorations.version, parsed.expected_version),
-        ),
-      )
-      .returning({ version: coreSchema.explorations.version });
-    if (!updated)
-      throw new CoreError("STALE_VERSION", 409, "探索已经发生变化", {
-        current_version: (await loadExploration(tx, ctx, exploration.id)).version,
-      });
+    const version = await reopenAndBump(
+      tx as unknown as Db,
+      ctx,
+      exploration,
+      parsed.expected_version,
+      true,
+    );
 
     const { source, span } = await createSource(tx, ctx, {
       kind: "conversation_message",
@@ -221,7 +243,7 @@ export async function saveExplorationMessage(
     });
     const response = jsonObject({
       exploration_id: exploration.id,
-      version: updated.version,
+      version,
       message_source_id: source.id,
       status: "pending",
       saved: true,
@@ -268,11 +290,10 @@ export async function withdrawClaimByOwner(
       .select({
         id: coreSchema.claimRevisions.id,
         claimId: coreSchema.claimRevisions.claimId,
-        status: coreSchema.claimRevisions.status,
       })
       .from(coreSchema.claimRevisions)
       .where(eq(coreSchema.claimRevisions.id, parsed.claim_revision_id))
-      .for("update");
+      .limit(1);
     const [claim] = target
       ? await tx
           .select()
@@ -287,14 +308,19 @@ export async function withdrawClaimByOwner(
           .limit(1)
       : [];
     if (!target || !claim) throw new CoreError("CLAIM_NOT_FOUND", 404, "认识不存在");
-    if (target.status !== "current")
-      throw new CoreError("STALE_CLAIM_REVISION", 409, "认识版本已经发生变化");
 
+    // Same lock order as every other commit: the conversation row first, then
+    // claim revisions. The version is incremented atomically so concurrent
+    // saves are never overwritten; in-flight work on this conversation then
+    // fails its version check instead of publishing over the withdrawal.
     const explorationId = claim.claimKey.split("/")[0] ?? "";
     const [exploration] = /^[0-9a-f-]{36}$/.test(explorationId)
       ? await tx
-          .select()
-          .from(coreSchema.explorations)
+          .update(coreSchema.explorations)
+          .set({
+            version: sql`${coreSchema.explorations.version} + 1`,
+            lastActivityAt: new Date(),
+          })
           .where(
             and(
               eq(coreSchema.explorations.id, explorationId),
@@ -302,8 +328,16 @@ export async function withdrawClaimByOwner(
               eq(coreSchema.explorations.subjectId, ctx.subjectId),
             ),
           )
-          .limit(1)
+          .returning()
       : [];
+
+    const [locked] = await tx
+      .select({ status: coreSchema.claimRevisions.status })
+      .from(coreSchema.claimRevisions)
+      .where(eq(coreSchema.claimRevisions.id, target.id))
+      .for("update");
+    if (locked?.status !== "current")
+      throw new CoreError("STALE_CLAIM_REVISION", 409, "认识版本已经发生变化");
 
     let sourceId: string | null = null;
     if (parsed.note) {
@@ -343,16 +377,7 @@ export async function withdrawClaimByOwner(
       note: parsed.note ?? "以后不要再用这条认识。",
       sourceItemId: sourceId,
     });
-    let version: number | null = null;
-    if (exploration) {
-      // Invalidate in-flight work that read the old claim set of this conversation.
-      const [bumped] = await tx
-        .update(coreSchema.explorations)
-        .set({ version: exploration.version + 1, lastActivityAt: new Date() })
-        .where(eq(coreSchema.explorations.id, exploration.id))
-        .returning({ version: coreSchema.explorations.version });
-      version = bumped?.version ?? null;
-    }
+    const version = exploration?.version ?? null;
     const response = jsonObject({
       claim_revision_id: target.id,
       withdrawn_revision_id: withdrawn?.id ?? null,
@@ -498,6 +523,12 @@ export async function replyToMessageWith(
   if (!draft)
     throw new CoreError("REPLY_REJECTED", 422, "这次回应没有通过校验，消息已保存，可以重新处理");
 
+  const offeredIds = [
+    ...new Set([
+      ...claims.map((claim) => claim.revisionId),
+      ...prior.claims.map((claim) => claim.revisionId),
+    ]),
+  ];
   const usedRevisions = [
     ...claims
       .filter((claim) => draft.used_claim_keys.includes(claim.key))
@@ -536,14 +567,25 @@ export async function replyToMessageWith(
         exploration.id,
         parsed.expected_version,
       );
-      // A claim used for the reply must still be current when it is shown.
-      const usedIds = usedRevisions.map((item) => item.claim_revision_id);
-      if (usedIds.length) {
+      // Every revision offered to the model must still be current with valid
+      // evidence, and stay so until this commit: lock them (conversation row
+      // first, then revisions in id order, as in all other commits). A
+      // withdrawal or source invalidation elsewhere then waits or fails this.
+      if (offeredIds.length) {
         const rows = await tx
-          .select({ id: coreSchema.claimRevisions.id, status: coreSchema.claimRevisions.status })
+          .select({
+            id: coreSchema.claimRevisions.id,
+            status: coreSchema.claimRevisions.status,
+            evidenceStatus: coreSchema.claimRevisions.evidenceStatus,
+          })
           .from(coreSchema.claimRevisions)
-          .where(inArray(coreSchema.claimRevisions.id, usedIds));
-        if (rows.some((row) => row.status !== "current"))
+          .where(inArray(coreSchema.claimRevisions.id, offeredIds))
+          .orderBy(coreSchema.claimRevisions.id)
+          .for("update");
+        if (
+          rows.length !== offeredIds.length ||
+          rows.some((row) => row.status !== "current" || row.evidenceStatus !== "valid")
+        )
           throw new CoreError("STALE_CLAIM_REVISION", 409, "回应期间相关认识已经变化，请重新处理");
       }
       const [turn] = await tx
@@ -561,6 +603,9 @@ export async function replyToMessageWith(
           sourceMeta: {
             ...meta,
             reply_status: "replied",
+            // New facts still have to reach the understanding; cleared when a
+            // later synthesis of this conversation commits.
+            ...(draft.new_information ? { understanding_status: "pending" } : {}),
             reply: {
               ...generation,
               turn_id: turn?.id ?? null,
@@ -614,6 +659,7 @@ export async function loadPendingInputs(
     .orderBy(coreSchema.sourceItems.capturedAt);
   const corrections = [];
   const messages = [];
+  const updates = [];
   for (const row of rows) {
     const meta = (row.meta ?? {}) as SourceMeta;
     if (meta.correction_status === "pending")
@@ -626,8 +672,31 @@ export async function loadPendingInputs(
       });
     if (meta.reply_status === "pending")
       messages.push({ source_id: row.id, message: row.content, saved_at: row.createdAt });
+    if (meta.understanding_status === "pending")
+      updates.push({ source_id: row.id, message: row.content, saved_at: row.createdAt });
   }
-  return { corrections, messages };
+  return { corrections, messages, updates };
+}
+
+/** A committed synthesis covered every saved input of this conversation. */
+export async function markUnderstandingProcessed(
+  tx: Pick<Db, "update">,
+  ctx: PersonalContext,
+  explorationId: string,
+) {
+  await tx
+    .update(coreSchema.sourceItems)
+    .set({
+      sourceMeta: sql`${coreSchema.sourceItems.sourceMeta} || '{"understanding_status":"processed"}'::jsonb`,
+    })
+    .where(
+      and(
+        eq(coreSchema.sourceItems.tenantId, ctx.tenantId),
+        eq(coreSchema.sourceItems.subjectId, ctx.subjectId),
+        sql`${coreSchema.sourceItems.sourceMeta}->>'exploration_id' = ${explorationId}`,
+        sql`${coreSchema.sourceItems.sourceMeta}->>'understanding_status' = 'pending'`,
+      ),
+    );
 }
 
 /** Recent changes to the owner's understanding, newest first. */

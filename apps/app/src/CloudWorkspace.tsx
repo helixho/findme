@@ -45,6 +45,8 @@ export default function CloudWorkspace() {
   >("home");
   const [selectedRun, setSelectedRun] = useState<string | null>(null);
   const [talkTarget, setTalkTarget] = useState<string | null>(null);
+  // Bumped whenever the workspace refreshes, so the home re-reads Core state too.
+  const [homeToken, setHomeToken] = useState(0);
   const [detailPane, setDetailPane] = useState<ReportPane>("read");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -95,8 +97,10 @@ export default function CloudWorkspace() {
   }, [refreshRuns]);
   useEffect(() => {
     const onVisible = () => {
-      if (document.visibilityState === "visible")
+      if (document.visibilityState === "visible") {
+        setHomeToken((n) => n + 1);
         void refreshRuns().catch((e) => setError(message(e)));
+      }
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);
@@ -215,6 +219,7 @@ export default function CloudWorkspace() {
               setView(key);
               setSelectedRun(null);
               setTalkTarget(null);
+              setHomeToken((n) => n + 1);
               void action(refreshRuns);
             }}
           >
@@ -269,6 +274,7 @@ export default function CloudWorkspace() {
                 profile={profile}
                 runs={runs}
                 mode={view as "home" | "topics" | "history"}
+                refreshToken={homeToken}
                 onTalk={(id) => {
                   setTalkTarget(id ?? null);
                   setView("talk");

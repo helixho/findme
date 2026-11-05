@@ -1,4 +1,5 @@
 import { coreSchema, createDb } from "@findme/db";
+import { eq } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { coreTestApp } from "./helper.js";
 
@@ -75,10 +76,17 @@ function gatewayOf(extract: Extract) {
 dbDescribe("Core conversation continuity (AG-07a)", () => {
   const { db, sql } = createDb(testUrl ?? "");
   let failModel = false;
+  // Runs while the reply is being generated, between its read and its commit.
+  let duringReply: (() => Promise<void>) | null = null;
   const app = coreTestApp({
     db,
     gateway: gatewayOf(async (input) => {
       if (failModel) throw new Error("synthetic_provider_failure");
+      if (duringReply && (input.system ?? "").includes("对话回应者")) {
+        const hook = duringReply;
+        duringReply = null;
+        await hook();
+      }
       return baseExtract(input);
     }),
   });
@@ -88,6 +96,7 @@ dbDescribe("Core conversation continuity (AG-07a)", () => {
 
   beforeEach(async () => {
     failModel = false;
+    duringReply = null;
     await sql.unsafe("TRUNCATE TABLE tenants RESTART IDENTITY CASCADE");
   });
   afterAll(async () => {
@@ -269,5 +278,95 @@ dbDescribe("Core conversation continuity (AG-07a)", () => {
     ).json();
     expect(list.items[0]).toMatchObject({ id, parked: true });
     expect(list.items[0].key_uncertainty).toBe("信息充分时是否也会等待？");
+  });
+
+  it("corrects a finished matter directly, reopening it", async () => {
+    const { id, done } = await understood();
+    const completed = await ok(`/api/core/explorations/${id}/complete`, {
+      expected_version: done.version,
+    });
+    const saved = await ok(`/api/core/explorations/${id}/corrections`, {
+      expected_version: completed.version,
+      claim_revision_ids: [done.claims[0].claim_revision_id],
+      correction: { type: "missing_context", note: "结束后才想起：当时上级也在场。" },
+    });
+    expect((await view(id)).status).toBe("active");
+    const revised = await ok(`/api/core/explorations/${id}/correct`, {
+      expected_version: saved.version,
+      correction_source_id: saved.correction_source_id,
+    });
+    expect(revised.claims[0].scope).toContain("上级在场");
+  });
+
+  it("increments the conversation version when a claim is withdrawn", async () => {
+    const { id, done } = await understood();
+    const saved = await ok(`/api/core/explorations/${id}/messages`, {
+      expected_version: done.version,
+      message: "先存一句。",
+    });
+    const withdrawn = await ok(
+      `/api/core/claim-revisions/${done.claims[0].claim_revision_id}/withdraw`,
+      {},
+    );
+    expect(withdrawn.version).toBe(saved.version + 1);
+    expect((await view(id)).version).toBe(saved.version + 1);
+  });
+
+  it("does not publish a reply whose claim was withdrawn while it was generated", async () => {
+    const first = await understood();
+    // A second matter whose reply is offered the first matter's claim.
+    const started = await ok("/api/core/explorations", { event: "另一次评审我也先听讨论。" });
+    const second = await ok(`/api/core/explorations/${started.exploration.id}/continue`, {
+      expected_version: started.exploration.version,
+    });
+    const saved = await ok(`/api/core/explorations/${started.exploration.id}/messages`, {
+      expected_version: second.version,
+      message: "评审时我为什么总先听？",
+    });
+    duringReply = async () => {
+      await ok(`/api/core/claim-revisions/${first.done.claims[0].claim_revision_id}/withdraw`, {});
+    };
+    const stale = await post(app, `/api/core/explorations/${started.exploration.id}/reply`, {
+      expected_version: saved.version,
+      message_source_id: saved.message_source_id,
+    });
+    expect(stale.status).toBe(409);
+    expect((await view(started.exploration.id)).pending.messages).toHaveLength(1);
+  });
+
+  it("does not publish a reply whose claim lost its evidence meanwhile", async () => {
+    const { id, done } = await understood();
+    const saved = await ok(`/api/core/explorations/${id}/messages`, {
+      expected_version: done.version,
+      message: "没听明白。",
+    });
+    duringReply = async () => {
+      await db
+        .update(coreSchema.claimRevisions)
+        .set({ evidenceStatus: "stale" })
+        .where(eq(coreSchema.claimRevisions.id, done.claims[0].claim_revision_id));
+    };
+    const stale = await post(app, `/api/core/explorations/${id}/reply`, {
+      expected_version: saved.version,
+      message_source_id: saved.message_source_id,
+    });
+    expect(stale.status).toBe(409);
+  });
+
+  it("keeps new facts pending until a synthesis covers them", async () => {
+    const { id, done } = await understood();
+    const saved = await ok(`/api/core/explorations/${id}/messages`, {
+      expected_version: done.version,
+      message: "后来数据核完了，我直接提了意见。",
+    });
+    const reply = await ok(`/api/core/explorations/${id}/reply`, {
+      expected_version: saved.version,
+      message_source_id: saved.message_source_id,
+    });
+    expect(reply.new_information).toBe(true);
+    // The page that would run /continue is gone: the state survives a reload.
+    expect((await view(id)).pending.updates).toHaveLength(1);
+    await ok(`/api/core/explorations/${id}/continue`, { expected_version: reply.version });
+    expect((await view(id)).pending.updates).toEqual([]);
   });
 });

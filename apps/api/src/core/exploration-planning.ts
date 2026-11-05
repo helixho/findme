@@ -1,6 +1,7 @@
 import { ContinueExplorationInput, CoreReportTarget, type ExplorationPlan } from "@findme/core";
 import { type Db, coreSchema } from "@findme/db";
 import { eq } from "drizzle-orm";
+import { markUnderstandingProcessed } from "./conversation.js";
 import {
   PLAN_VALIDATOR_VERSION,
   PURPOSEFUL_EXPLORATION_POLICY,
@@ -420,6 +421,8 @@ async function generateAndCommitContinue(
       if (existingOpen) {
         throw new CoreError("QUESTION_NOT_OPEN", 409, "当前还有一个待回答的问题");
       }
+      // The version check above guarantees this synthesis read every saved input.
+      await markUnderstandingProcessed(tx, ctx, exploration.id);
 
       const priorEffects = await applyPriorUpdates(tx, {
         prior,

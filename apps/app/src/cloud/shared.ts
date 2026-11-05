@@ -13,6 +13,8 @@ export type Run = {
   updated_at?: string;
   report?: UnderstandingReport | null;
   report_revision_id?: string | null;
+  /** Generation time of the current report revision (fixed, unlike updated_at). */
+  report_created_at?: string | null;
   report_status?: string;
   report_origin?: {
     kind: string;

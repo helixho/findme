@@ -269,6 +269,8 @@ export type PendingInputs = {
     saved_at: string;
   }>;
   messages: Array<{ source_id: string; message: string; saved_at: string }>;
+  /** Replied messages whose new facts have not reached the understanding yet. */
+  updates?: Array<{ source_id: string; message: string; saved_at: string }>;
 };
 
 export type UnderstandingChange = {

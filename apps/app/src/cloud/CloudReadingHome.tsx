@@ -16,6 +16,7 @@ export function CloudReadingHome({
   mode,
   onOpen,
   onTalk,
+  refreshToken = 0,
 }: {
   runs: Run[];
   profile: string;
@@ -23,15 +24,18 @@ export function CloudReadingHome({
   onOpen: (runId: string, pane?: ReportPane) => void;
   /** Opens the conversation, optionally continuing a saved matter. */
   onTalk?: (explorationId?: string) => void;
+  /** Changes when the workspace refreshes (window visible again, home clicked). */
+  refreshToken?: number;
 }) {
   const [core, setCore] = useState<{
     current: CurrentUnderstandingResponse;
     changes: UnderstandingChange[];
     open: ExplorationSummary[];
   } | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshToken requests a re-read.
   useEffect(() => {
+    // Keep the shown data until the newer read arrives; a superseded read is ignored.
     let active = true;
-    setCore(null);
     if (profile && mode === "home")
       void Promise.all([
         cloudRequest<CurrentUnderstandingResponse>("/api/core/understanding"),
@@ -50,7 +54,7 @@ export function CloudReadingHome({
     return () => {
       active = false;
     };
-  }, [profile, mode]);
+  }, [profile, mode, refreshToken]);
   const overall = runs.find((r) => r.domain === "overall");
   const [overview, setOverview] = useState<Run | null>(null);
   const [error, setError] = useState("");
@@ -84,7 +88,9 @@ export function CloudReadingHome({
       ? overview.report
       : null;
   const topicRuns = mode === "history" ? runs : runs.filter((r) => r.domain !== "overall");
-  const reportTime = overview?.updated_at ?? overall?.updated_at ?? null;
+  // The report revision's own generation time: the run's updated_at also moves
+  // on feedback such as "helpful", which does not change the report.
+  const reportTime = overview?.report_created_at ?? null;
   const laterChanges =
     core && reportTime
       ? core.changes.filter((c) => new Date(c.changed_at) > new Date(reportTime))

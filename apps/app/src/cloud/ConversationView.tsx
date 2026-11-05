@@ -110,6 +110,9 @@ export function ConversationView({ resumeId }: { resumeId?: string | null } = {}
   const [correctionType, setCorrectionType] = useState<string>("missing_context");
   const [correctionNote, setCorrectionNote] = useState("");
   const [notice, setNotice] = useState("");
+  // The saved conversation of the open matter, shown whatever the analysis
+  // step is (asking, processing, failed or done).
+  const [thread, setThread] = useState<ExplorationView | null>(null);
 
   const refresh = useCallback(async () => {
     const [s, c, active, completed] = await Promise.all([
@@ -170,6 +173,7 @@ export function ConversationView({ resumeId }: { resumeId?: string | null } = {}
       () => null,
     );
     if (!view) return;
+    setThread(view);
     setStep((prev) =>
       prev.kind === "done" && prev.data.exploration_id === id && prev.data.version === view.version
         ? { kind: "done", data: { ...prev.data, view } }
@@ -179,6 +183,7 @@ export function ConversationView({ resumeId }: { resumeId?: string | null } = {}
 
   async function resume(id: string, allowProceed = true) {
     const view = await cloudRequest<ExplorationView>(`/api/core/explorations/${id}`);
+    setThread(view);
     if (view.phase === "awaiting_answer" && view.open_question)
       return setStep({
         kind: "ask",
@@ -240,11 +245,13 @@ export function ConversationView({ resumeId }: { resumeId?: string | null } = {}
         setNotice("回应仍在生成，稍后刷新查看。");
         return resume(id, false);
       }
+      // Show the reply first; updating the understanding only changes the
+      // analysis part below it, and a pending update survives a reload.
+      await resume(id, false);
       if (reply.new_information) {
         setNotice("这次补充带来了新信息，正在据此更新认识。");
-        return proceed(id, reply.version);
+        await proceed(id, reply.version);
       }
-      return resume(id, false);
     } catch (e) {
       setNotice(`消息已保存。${explain(e)}`);
       return resume(id, false);
@@ -405,6 +412,7 @@ export function ConversationView({ resumeId }: { resumeId?: string | null } = {}
         </>
       )}
 
+      {step.kind === "saved" && thread?.id === step.id && <ThreadLog view={thread} />}
       {step.kind === "saved" && (
         <div className="conversation-saved">
           <p>已保存。{step.note}</p>
@@ -437,6 +445,9 @@ export function ConversationView({ resumeId }: { resumeId?: string | null } = {}
         </div>
       )}
 
+      {step.kind === "ask" && thread?.id === step.data.exploration_id && (
+        <ThreadLog view={thread} />
+      )}
       {step.kind === "ask" && (
         <div className="conversation-ask">
           {step.data.reading.current_reading && <p>{step.data.reading.current_reading}</p>}
@@ -661,6 +672,19 @@ export function ConversationView({ resumeId }: { resumeId?: string | null } = {}
             </div>
           )}
 
+          {!!step.data.view?.pending?.updates?.length && (
+            <div className="conversation-saved">
+              <p>你补充的新信息还没有更新到认识里。</p>
+              <button
+                type="button"
+                className="button secondary"
+                disabled={busy}
+                onClick={() => void run(() => proceed(step.data.exploration_id, step.data.version))}
+              >
+                更新认识
+              </button>
+            </div>
+          )}
           <div className="conversation-thread">
             <h3>接着聊这件事</h3>
             {(step.data.view?.turns ?? [])
@@ -791,5 +815,21 @@ function Finish(props: {
     >
       这件事先到这里
     </button>
+  );
+}
+
+/** Read-only conversation log of a matter. */
+function ThreadLog({ view }: { view: ExplorationView }) {
+  const turns = (view.turns ?? []).filter((turn) => THREAD_KINDS.has(turn.turnKind));
+  if (!turns.length) return null;
+  return (
+    <div className="conversation-thread">
+      {turns.map((turn) => (
+        <p key={turn.id} className={turn.role === "user" ? "thread-user" : "thread-reply"}>
+          <span className="muted">{turn.role === "user" ? "我" : "FindMe"}：</span>
+          {turn.content}
+        </p>
+      ))}
+    </div>
   );
 }
