@@ -47,11 +47,15 @@ try {
     });
   if (mode !== "db" && mode !== "app") {
     console.log("[runner] Node script unit tests (DB-free)");
-    await run(process.execPath, ["--test", "scripts/test-runner.test.mjs", "scripts/native-runtime.test.mjs"], {
-      cwd: root,
-      env,
-      signal: controller.signal,
-    });
+    await run(
+      process.execPath,
+      ["--test", "scripts/test-runner.test.mjs", "scripts/native-runtime.test.mjs"],
+      {
+        cwd: root,
+        env,
+        signal: controller.signal,
+      },
+    );
   }
   for (const group of ["local", "db"]) {
     if (!selected[group].length) {

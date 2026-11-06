@@ -1178,3 +1178,14 @@ CREATE TABLE public.pi_session_archives (
  created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE UNIQUE INDEX pi_session_archives_revision_unique ON public.pi_session_archives(tenant_id,subject_id,conversation_id,session_id,revision);
+
+CREATE TABLE public.pi_request_records (
+ id uuid PRIMARY KEY DEFAULT gen_random_uuid(), tenant_id uuid NOT NULL REFERENCES public.tenants(id),
+ subject_id uuid NOT NULL REFERENCES public.subjects(id), conversation_id text NOT NULL,
+ operation_id uuid NOT NULL REFERENCES public.core_operations(id), attempt_id uuid NOT NULL, sequence integer NOT NULL CHECK(sequence>0),
+ dependencies jsonb NOT NULL, pi_input jsonb, provider_payload jsonb, output jsonb,
+ status text NOT NULL DEFAULT 'prepared', reserved_usd double precision,
+ provider_actual_usd double precision, estimated_cost_usd double precision,
+ created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX pi_request_records_identity ON public.pi_request_records(tenant_id,subject_id,operation_id,attempt_id,sequence);

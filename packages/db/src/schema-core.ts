@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
   boolean,
   check,
+  doublePrecision,
   index,
   integer,
   jsonb,
@@ -475,6 +476,46 @@ export const piSessionArchives = pgTable(
       t.conversationId,
       t.sessionId,
       t.revision,
+    ),
+  }),
+);
+
+/** One auditable record per actual pi request; checkpoint bodies are kept separately. */
+export const piRequestRecords = pgTable(
+  "pi_request_records",
+  {
+    id: id(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id),
+    subjectId: uuid("subject_id")
+      .notNull()
+      .references(() => subjects.id),
+    conversationId: text("conversation_id").notNull(),
+    operationId: uuid("operation_id")
+      .notNull()
+      .references(() => coreOperations.id),
+    attemptId: uuid("attempt_id").notNull(),
+    sequence: integer("sequence").notNull(),
+    dependencies: jsonb("dependencies")
+      .$type<Array<{ sourceId: string; fingerprint: string }>>()
+      .notNull(),
+    piInput: jsonb("pi_input").$type<unknown>(),
+    providerPayload: jsonb("provider_payload").$type<unknown>(),
+    output: jsonb("output").$type<unknown>(),
+    status: text("status").notNull().default("prepared"),
+    reservedUsd: doublePrecision("reserved_usd"),
+    providerActualUsd: doublePrecision("provider_actual_usd"),
+    estimatedCostUsd: doublePrecision("estimated_cost_usd"),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    identity: uniqueIndex("pi_request_records_identity").on(
+      t.tenantId,
+      t.subjectId,
+      t.operationId,
+      t.attemptId,
+      t.sequence,
     ),
   }),
 );

@@ -78,6 +78,11 @@ const parts: Record<string, { table: string; owner: string; order: string | stri
       "exists(select 1 from claim_revisions r join claims c on c.id=r.claim_id where r.id=t.claim_revision_id and c.tenant_id=$T and c.subject_id=$S)",
     order: "id",
   },
+  pi_request_records: {
+    table: "pi_request_records",
+    owner: "t.tenant_id=$T and t.subject_id=$S",
+    order: "id",
+  },
   pi_session_archives: {
     table: "pi_session_archives",
     owner: "t.tenant_id=$T and t.subject_id=$S",

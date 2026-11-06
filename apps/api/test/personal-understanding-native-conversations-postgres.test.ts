@@ -51,7 +51,7 @@ it("reads complete native messages, preserves short-answer context and withholds
             explorationId: conversation!.id,
             role: "assistant",
             turnKind: "reply",
-            content: `A 参加；B 休息。${"具体背景".repeat(500)}`,
+            content: `OLD_ANALYSIS。你更想选哪个？\nA. 参加\nB. 休息\n${"具体背景".repeat(500)}`,
             createdAt: new Date(1000),
           },
           {
@@ -67,9 +67,16 @@ it("reads complete native messages, preserves short-answer context and withholds
       },
     );
     const reader = new NativeConversationReader(runtime.db);
-    const full = await reader.read(ctx, { conversationId });
+    const full = await reader.read(ctx, { conversationId, includeAnalysis: true });
     expect(full.turns[0]!.content!.length).toBeGreaterThan(1500);
     expect(full.turns[1]!.content).toBe("B");
+    const filtered = await reader.read(ctx, { conversationId });
+    expect(filtered.turns[0]!.content).toContain("你更想选哪个？");
+    expect(filtered.turns[0]!.content).toContain("B. 休息");
+    expect(JSON.stringify(filtered)).not.toContain("OLD_ANALYSIS");
+    expect(JSON.stringify(filtered)).not.toContain("具体背景");
+    const answerPage = await reader.read(ctx, { conversationId, cursor: 1, limit: 1 });
+    expect(answerPage.preceding_question_background).toContain("B. 休息");
     expect(full.turns[0]!.qualification).toBe("assistant_context_not_evidence");
     const first = await reader.read(ctx, { conversationId, limit: 1 });
     expect(first.next_cursor).toBe(1);
@@ -116,7 +123,7 @@ it("reads complete native messages, preserves short-answer context and withholds
         .where(eq(c.sourceItems.id, sourceId));
       return a.id;
     });
-    const beforeAExcluded = await reader.read(ctx, { conversationId });
+    const beforeAExcluded = await reader.read(ctx, { conversationId, includeAnalysis: true });
     expect(beforeAExcluded.dependencies.map((d) => d.sourceId)).toContain(sourceA);
     expect(beforeAExcluded.turns.find((t) => t.kind === "pi_reply")?.content).toContain(
       "A-private-original",
@@ -127,7 +134,7 @@ it("reads complete native messages, preserves short-answer context and withholds
         .set({ usageStatus: "excluded" })
         .where(eq(c.sourceItems.id, sourceA)),
     );
-    const afterAExcluded = await reader.read(ctx, { conversationId });
+    const afterAExcluded = await reader.read(ctx, { conversationId, includeAnalysis: true });
     expect(afterAExcluded.turns.find((t) => t.kind === "pi_reply")?.content).toBeNull();
     expect(JSON.stringify(afterAExcluded)).not.toContain("A-private-original");
     await withProfileTransaction(runtime.db, ctx, (tx) =>
@@ -136,6 +143,62 @@ it("reads complete native messages, preserves short-answer context and withholds
         .set({ usageStatus: "excluded" })
         .where(eq(c.sourceItems.id, sourceId)),
     );
+    const independentReply = await withProfileTransaction(runtime.db, ctx, async (tx) => {
+      const [independent] = await tx
+        .insert(c.sourceItems)
+        .values({
+          ...ctx,
+          sourceKind: "native_event",
+          authorKind: "subject",
+          content: "independent valid input",
+        })
+        .returning();
+      if (!independent) throw new Error("fixture");
+      await tx
+        .insert(c.sourceAssessments)
+        .values({
+          sourceItemId: independent.id,
+          version: 1,
+          attributionStatus: "confirmed_subject",
+          contextCompleteness: "sufficient",
+          temporalPrecision: "unknown",
+          eligibility: "eligible",
+          rationale: "synthetic",
+        });
+      await tx
+        .insert(c.explorationTurns)
+        .values({
+          explorationId: conversationId,
+          sourceItemId: independent.id,
+          role: "user",
+          turnKind: "message",
+          content: independent.content,
+          createdAt: new Date(4000),
+        });
+      const [reply] = await tx
+        .insert(c.explorationTurns)
+        .values({
+          explorationId: conversationId,
+          role: "assistant",
+          turnKind: "pi_reply",
+          content: "Independent answer. Which option?\nA. Continue\nB. Stop",
+          createdAt: new Date(5000),
+        })
+        .returning();
+      if (!reply) throw new Error("fixture");
+      await tx
+        .update(c.sourceItems)
+        .set({
+          sourceMeta: { reply: { engine: "pi", turn_id: reply.id, source_ids: [independent.id] } },
+        })
+        .where(eq(c.sourceItems.id, independent.id));
+      return reply.id;
+    });
+    const precise = await reader.read(ctx, { conversationId, includeAnalysis: true });
+    expect(precise.turns.find((turn) => turn.id === independentReply)?.content).toContain(
+      "Independent answer",
+    );
+    expect(precise.turns[0]?.content).toBeNull();
     const hidden = await reader.read(ctx, { conversationId, limit: 1 });
     expect(hidden.assistant_context_withheld).toBe(true);
     expect(hidden.turns[0]!.content).toBeNull();

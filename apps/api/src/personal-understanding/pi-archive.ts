@@ -371,6 +371,19 @@ function archiveTransaction(tx: ProfileTransaction, scoped: PiArchiveScope): PiA
       return true;
     },
     insertRevision: async (record) => {
+      // Only the latest revision carries a recoverable body; older rows retain lineage metadata.
+      await tx
+        .update(c.piSessionArchives)
+        .set({ archive: null, status: "superseded" })
+        .where(
+          and(
+            eq(c.piSessionArchives.tenantId, scoped.tenantId),
+            eq(c.piSessionArchives.subjectId, scoped.subjectId),
+            eq(c.piSessionArchives.conversationId, record.conversationId),
+            eq(c.piSessionArchives.sessionId, record.archive.sessionId),
+            sql`not (coalesce(${c.piSessionArchives.archive}, '{}'::jsonb) ? 'records')`,
+          ),
+        );
       await tx.insert(c.piSessionArchives).values({
         ...scoped,
         conversationId: record.conversationId,

@@ -185,3 +185,149 @@ test("launcher executes built API with scoped env and forwards termination", asy
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("failed release build leaves the current application files and pointer intact", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "findme-release-failure-"));
+  try {
+    const { execFileSync } = await import("node:child_process");
+    const repo = path.join(root, "source");
+    const state = path.join(root, "state");
+    const bin = path.join(root, "bin");
+    const active = path.join(state, "releases", "existing");
+    await mkdir(repo);
+    await mkdir(bin);
+    await mkdir(active, { recursive: true });
+    await writeFile(path.join(active, "served.html"), "old-content");
+    const { symlink, chmod, readFile, readlink, readdir } = await import("node:fs/promises");
+    await symlink(active, path.join(state, "current"));
+    await writeFile(
+      path.join(state, "runtime.env"),
+      "FINDME_PORT=8000\nFINDME_PUBLIC_URL=https://example.test\nDATABASE_LOCATION=db.example.test/findme\n",
+    );
+    execFileSync("git", ["init", "-q", repo]);
+    await mkdir(path.join(repo, "scripts"));
+    await writeFile(
+      path.join(repo, "scripts", "install-deploy.sh"),
+      await readFile(path.resolve("scripts/install-deploy.sh")),
+    );
+    await writeFile(path.join(repo, "served.html"), "candidate-content");
+    execFileSync("git", ["-C", repo, "add", "."]);
+    execFileSync("git", [
+      "-C",
+      repo,
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.test",
+      "commit",
+      "-qm",
+      "fixture",
+    ]);
+    for (const [name, body] of Object.entries({
+      pnpm: "#!/bin/sh\nexit 23\n",
+      systemctl: "#!/bin/sh\necho unexpected-service-change >&2\nexit 24\n",
+      sudo: '#!/bin/sh\nexec "$@"\n',
+    })) {
+      await writeFile(path.join(bin, name), body);
+      await chmod(path.join(bin, name), 0o755);
+    }
+    let failure;
+    try {
+      execFileSync(
+        "bash",
+        [path.join(repo, "scripts/install-deploy.sh"), "--state-dir", state, "--no-publish"],
+        { env: { ...process.env, PATH: `${bin}:${process.env.PATH}` }, stdio: "pipe" },
+      );
+    } catch (error) {
+      failure = error;
+    }
+    assert.equal(failure?.status, 23);
+    assert.equal(await readFile(path.join(active, "served.html"), "utf8"), "old-content");
+    assert.equal(await readlink(path.join(state, "current")), active);
+    assert.deepEqual(await readdir(path.join(state, "releases")), ["existing"]);
+    assert.doesNotMatch(String(failure?.stderr), /unexpected-service-change/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("activation restart failure restores the existing service and release pointer", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "findme-release-activation-"));
+  try {
+    const { execFileSync } = await import("node:child_process");
+    const { symlink, chmod, readFile, readlink, readdir } = await import("node:fs/promises");
+    const repo = path.join(root, "source");
+    const state = path.join(root, "state");
+    const bin = path.join(root, "bin");
+    const active = path.join(state, "releases", "existing");
+    const unit = path.join(root, "unit");
+    await mkdir(repo);
+    await mkdir(bin);
+    await mkdir(path.join(active, "scripts"), { recursive: true });
+    await writeFile(path.join(active, "scripts/native-runtime.mjs"), "// existing");
+    await symlink(active, path.join(state, "current"));
+    await writeFile(path.join(state, "deployed-commit"), "old-commit\n");
+    await writeFile(
+      path.join(state, "runtime.env"),
+      "FINDME_PORT=8000\nFINDME_PUBLIC_URL=https://example.test\nDATABASE_LOCATION=db.example.test/findme\n",
+    );
+    execFileSync("git", ["init", "-q", repo]);
+    await mkdir(path.join(repo, "scripts"));
+    await writeFile(
+      path.join(repo, "scripts/install-deploy.sh"),
+      await readFile(path.resolve("scripts/install-deploy.sh")),
+    );
+    execFileSync("git", ["-C", repo, "add", "."]);
+    execFileSync("git", [
+      "-C",
+      repo,
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.test",
+      "commit",
+      "-qm",
+      "fixture",
+    ]);
+    const mocks = {
+      node: "#!/bin/sh\nexit 0\n",
+      pnpm: "#!/bin/sh\nexit 0\n",
+      docker: "#!/bin/sh\nexit 0\n",
+      sudo: '#!/bin/sh\nexec "$@"\n',
+      tee: '#!/bin/sh\ncase "$1" in /etc/systemd/system/findme-app.service.next) cat > "$TEST_UNIT.next";; *) exec /usr/bin/tee "$@";; esac\n',
+      mv: '#!/bin/sh\nif [ "$2" = /etc/systemd/system/findme-app.service.next ]; then exec /bin/mv -f "$TEST_UNIT.next" "$TEST_UNIT"; fi\nexec /bin/mv "$@"\n',
+      systemctl:
+        '#!/bin/sh\nif [ "$1" = show ]; then echo "$TEST_OLD"; exit 0; fi\nif [ "$1" = restart ]; then if grep -q "WorkingDirectory=$TEST_OLD$" "$TEST_UNIT"; then exit 0; else exit 17; fi; fi\nexit 0\n',
+    };
+    for (const [name, body] of Object.entries(mocks)) {
+      await writeFile(path.join(bin, name), body);
+      await chmod(path.join(bin, name), 0o755);
+    }
+    let failure;
+    try {
+      execFileSync(
+        "bash",
+        [path.join(repo, "scripts/install-deploy.sh"), "--state-dir", state, "--no-publish"],
+        {
+          env: {
+            ...process.env,
+            PATH: `${bin}:${process.env.PATH}`,
+            TEST_UNIT: unit,
+            TEST_OLD: active,
+          },
+          stdio: "pipe",
+        },
+      );
+    } catch (error) {
+      failure = error;
+    }
+    assert.equal(failure?.status, 17);
+    assert.equal(await readlink(path.join(state, "current")), active);
+    assert.equal(await readFile(path.join(state, "deployed-commit"), "utf8"), "old-commit\n");
+    assert.match(await readFile(unit, "utf8"), new RegExp(`WorkingDirectory=${active}`));
+    assert.deepEqual(await readdir(path.join(state, "releases")), ["existing"]);
+    assert.match(String(failure?.stderr), /previous application restored/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

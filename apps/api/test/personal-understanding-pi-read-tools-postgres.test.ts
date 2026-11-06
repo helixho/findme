@@ -48,6 +48,22 @@ it("collects exact source dependencies and rejects excluded or cross-profile rea
       return JSON.parse(result.content[0].text);
     };
     expect((await call("search_history", { query: "合成关键词" })).items[0].id).toBe(source.id);
+    expect((await call("search_history", { query: "合成 关键词" })).items[0].id).toBe(source.id);
+    const excluding = createPiReadTools(db.db, ctx, [], { currentMessageId: source.id }).tools.find(
+      (t) => t.name === "search_history",
+    );
+    if (!excluding) throw new Error("missing search");
+    const excludedResult = await (
+      excluding.execute as unknown as (
+        id: string,
+        input: unknown,
+      ) => Promise<{ content: Array<{ text: string }> }>
+    )("exclude-current", { query: "合成 关键词" });
+    expect(JSON.parse((excludedResult.content[0] as { text: string }).text).items).toEqual([]);
+    expect((await call("read_source", { id: source.id })).content).toBeNull();
+    expect(
+      (await call("read_source", { id: source.id, include_analysis: true })).content,
+    ).toContain("合成关键词");
     expect((await call("read_source", { id: source.id })).author).toBe("assistant");
     expect(toolset.dependencies()).toHaveLength(1);
     expect(toolset.dependencies()[0]!.sourceId).toBe(source.id);

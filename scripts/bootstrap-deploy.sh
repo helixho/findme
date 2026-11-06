@@ -11,7 +11,7 @@ NEW_CHECKOUT=0
 if [[ ! -d $CHECKOUT/.git ]]; then
   [[ ! -e $CHECKOUT ]] || { echo "Checkout path already exists: $CHECKOUT" >&2; exit 1; }
   mkdir -p "$(dirname "$CHECKOUT")"
-  git clone --no-checkout "$REPOSITORY" "$CHECKOUT"
+  git clone "$REPOSITORY" "$CHECKOUT"
   NEW_CHECKOUT=1
 fi
 [[ $(git -C "$CHECKOUT" remote get-url origin) == "$REPOSITORY" ]] || { echo 'Checkout origin does not match FINDME_REPOSITORY.' >&2; exit 1; }
@@ -20,6 +20,9 @@ if (( ! NEW_CHECKOUT )); then
 fi
 git -C "$CHECKOUT" fetch --depth=1 origin "$REF"
 COMMIT=$(git -C "$CHECKOUT" rev-parse FETCH_HEAD)
-git -C "$CHECKOUT" checkout --detach "$COMMIT"
+# Do not checkout or rebuild a tree that may still serve the running application.
+INSTALLER=$(mktemp)
+trap 'rm -f "$INSTALLER"' EXIT
+git -C "$CHECKOUT" show "$COMMIT:scripts/install-deploy.sh" > "$INSTALLER"
 echo "[deploy] Source commit: $COMMIT"
-FINDME_DEPLOY_COMMIT=$COMMIT bash "$CHECKOUT/scripts/install-deploy.sh" "$@"
+FINDME_SOURCE_REPO=$CHECKOUT FINDME_DEPLOY_COMMIT=$COMMIT bash "$INSTALLER" "$@"

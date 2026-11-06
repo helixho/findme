@@ -190,7 +190,7 @@ it("runs real pi tools, persists traces, resumes the same session, replays idemp
   const f = await fixture();
   try {
     const historical = await conversation(f.db, f.ctx, "合成历史：我选周六活动，因为周日要休息。");
-    const thread = await conversation(f.db, f.ctx, "请查一下我以前为什么选周六活动。");
+    const thread = await conversation(f.db, f.ctx, "请查合成历史，看看我以前为什么选周六活动。");
     let firstToolContext = "";
     f.provider.setResponses([
       fauxAssistantMessage(
@@ -210,6 +210,9 @@ it("runs real pi tools, persists traces, resumes the same session, replays idemp
     expect(result.version).toBe(2);
     expect(firstToolContext).toContain("周日要休息");
     expect(firstToolContext).toContain("toolResult");
+    expect(firstToolContext).not.toContain(thread.sourceId);
+    expect(firstToolContext).toContain("区分本人直接表达、本人转述、粘贴原文");
+    expect(firstToolContext).toContain("## 步骤");
     const rows = await withProfileTransaction(f.db, f.ctx, (tx) =>
       tx
         .select()
@@ -218,7 +221,30 @@ it("runs real pi tools, persists traces, resumes the same session, replays idemp
     );
     const latest = rows.sort((a, b) => b.revision - a.revision)[0];
     expect(latest?.archive?.complete).toBe(true);
-    expect(JSON.stringify(latest?.archive?.records)).toContain("context");
+    expect(latest?.archive?.records).toBeUndefined();
+    const loadedMethods = latest?.archive?.loadedMethods as Array<{
+      name: string;
+      version: string;
+      referenceVersion: string;
+    }>;
+    expect(
+      loadedMethods.some(
+        (method) =>
+          method.name === "experience-and-evidence" &&
+          /^[a-f0-9]{64}$/.test(method.version) &&
+          /^[a-f0-9]{64}$/.test(method.referenceVersion),
+      ),
+    ).toBe(true);
+    const traces = await withProfileTransaction(f.db, f.ctx, (tx) =>
+      tx.select().from(c.piRequestRecords).where(eq(c.piRequestRecords.conversationId, thread.id)),
+    );
+    expect(traces).toHaveLength(2);
+    expect(
+      traces.every(
+        (trace) => trace.status === "completed" && trace.piInput !== null && trace.output !== null,
+      ),
+    ).toBe(true);
+    expect(JSON.stringify(traces[0]?.piInput)).toContain("区分本人直接表达、本人转述、粘贴原文");
     expect(latest?.dependencies.some((d) => d.sourceId === historical.sourceId)).toBe(true);
     expect(latest?.dependencies.some((d) => d.sourceId === thread.sourceId)).toBe(true);
     const calls = f.provider.state.callCount;
@@ -315,17 +341,36 @@ it("propagates A source exclusion through B conversation reads into C archives a
     const cThread = await conversation(f.db, f.ctx, "查看B会话的说明");
     const cKey = randomUUID();
     let expanded = "";
+    let defaultExpanded = "";
     f.provider.setResponses([
-      fauxAssistantMessage(fauxToolCall("read_conversation", { id: b.id }, { id: "read-b" }), {
-        stopReason: "toolUse",
-      }),
+      fauxAssistantMessage(
+        fauxToolCall("read_conversation", { id: b.id }, { id: "read-b-default" }),
+        {
+          stopReason: "toolUse",
+        },
+      ),
+      (context) => {
+        defaultExpanded = JSON.stringify(context);
+        return fauxAssistantMessage(
+          fauxToolCall(
+            "read_conversation",
+            { id: b.id, include_analysis: true },
+            { id: "read-b-analysis" },
+          ),
+          { stopReason: "toolUse" },
+        );
+      },
       (context) => {
         expanded = JSON.stringify(context);
         return final("C_PRIVATE_DERIVATION：周日休息");
       },
     ]);
     expect((await request(f, cThread, cKey)).status).toBe(201);
+    expect(defaultExpanded).not.toContain("B_PRIVATE_DERIVATION");
     expect(expanded).toContain("B_PRIVATE_DERIVATION");
+    const unrelated = await conversation(f.db, f.ctx, "独立讨论：今天选择散步");
+    f.provider.setResponses([final("UNRELATED_REPLY_STAYS")]);
+    expect((await request(f, unrelated)).status).toBe(201);
     const before = await withProfileTransaction(f.db, f.ctx, (tx) =>
       tx.select().from(c.piSessionArchives),
     );
@@ -361,6 +406,23 @@ it("propagates A source exclusion through B conversation reads into C archives a
       }
       const turns = await tx.select().from(c.explorationTurns);
       expect(
+        turns.some(
+          (row) => row.explorationId === unrelated.id && row.content === "UNRELATED_REPLY_STAYS",
+        ),
+      ).toBe(true);
+      const replySource = (
+        await tx.select().from(c.sourceItems).where(eq(c.sourceItems.id, cThread.sourceId))
+      )[0];
+      expect(replySource?.sourceMeta?.reply_status).toBe("pending");
+      const traces = await tx.select().from(c.piRequestRecords);
+      expect(
+        traces
+          .filter((row) => row.dependencies.some((d) => d.sourceId === a.sourceId))
+          .every(
+            (row) => row.piInput === null && row.providerPayload === null && row.output === null,
+          ),
+      ).toBe(true);
+      expect(
         turns
           .filter(
             (row) => [b.id, cThread.id].includes(row.explorationId) && row.role === "assistant",
@@ -379,6 +441,18 @@ it("propagates A source exclusion through B conversation reads into C archives a
     expect(replay.status).toBe(409);
     expect(JSON.stringify(await replay.json())).not.toContain("C_PRIVATE_DERIVATION");
     expect(f.provider.state.callCount).toBe(beforeReplay);
+    const repairedVersion = await withProfileTransaction(
+      f.db,
+      f.ctx,
+      async (tx) =>
+        (await tx.select().from(c.explorations).where(eq(c.explorations.id, cThread.id)))[0]
+          ?.version ?? 0,
+    );
+    f.provider.setResponses([final("重新核对后，只能承接仍有效的本人表达。")]);
+    const reanswered = await request(f, { ...cThread, version: repairedVersion });
+    expect(reanswered.status).toBe(201);
+    expect((await reanswered.json()).reply).toContain("仍有效");
+    expect(f.provider.state.callCount).toBe(beforeReplay + 1);
   } finally {
     await f.close();
   }

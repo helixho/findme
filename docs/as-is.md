@@ -20,7 +20,7 @@
 
 ## 2. 运行方式
 
-唯一运行方式是单节点：一个 Node 进程提供网页、API 和后台执行器，账号模式是唯一登录方式，数据库为任意 PostgreSQL（默认同节点容器）。旧的静态/会话/私有模式、旧版速记/洞察/问卷/素材接口、旧任务队列及其数据表，以及 Cloudflare Worker 与 Neon 专用读取已从源码移除。表结构的当前定义为 [schema.sql](../packages/db/schema.sql)，空库据此建表，已有库执行 `packages/db/migrations/` 中尚未执行的升级；账号角色与行级策略见 [account-runtime.sql](../packages/db/access/account-runtime.sql)。模型服务商、密钥与预算存于数据库 `app_settings`，结构与默认值由 `standalone/settings.ts` 定义；`index.ts` 启动时读取，修改后须重启应用才能生效，App 不提供修改入口。登录身份的签发者固定为 `findme-account`，与实例网址无关。
+唯一运行方式是单节点：一个 Node 进程提供网页、API 和后台执行器，通过唯一内部 owner 身份使用，无登录交互，数据库为任意 PostgreSQL（默认同节点容器）。旧的静态/会话/私有模式、旧版速记/洞察/问卷/素材接口、旧任务队列及其数据表，以及 Cloudflare Worker 与 Neon 专用读取已从源码移除。表结构的当前定义为 [schema.sql](../packages/db/schema.sql)，空库据此建表，已有库执行 `packages/db/migrations/` 中尚未执行的升级；账号角色与行级策略见 [account-runtime.sql](../packages/db/access/account-runtime.sql)。模型服务商、密钥与预算存于数据库 `app_settings`，结构与默认值由 `standalone/settings.ts` 定义；`index.ts` 启动时读取，修改后须重启应用才能生效，App 不提供修改入口。登录身份的签发者固定为 `findme-account`，与实例网址无关。
 
 ## 4. AV 本人小批内测（独立 staging）
 
@@ -197,8 +197,9 @@ Core 来源评估和账号来源排除/恢复/重绑共用 `core/source-invalida
 - `index.ts` 在模型配置含 key 时创建 `piReply`，注入账号 `/reply`；`personal-understanding/pi-conversation.ts` 使用完整 AgentSession SDK，恢复有效归档，以当前会话和历史原文为主，通过 `pi-read-tools.ts` 提供原文检索、会话/来源展开和方法读取。旧网关回应保留作未注入 pi 的兼容路径，不能据此声称生产入口仍固定一次生成。
 - 长请求可返回 HTTP 202，保留同一个已预留操作继续执行；`GET /api/core/model-operations/:id` 按当前 Profile 只读查询状态。App 自动轮询，失败不自动发起新的收费重试；请求及 lease 时限以账号路由、pi provider 和记录回调代码为准。
 - `pi-provider.ts` 只连接明确的 OpenRouter 出口；实际请求经过原有 Profile 每日操作闸及每操作的请求、输入、输出、费用和报价上限，禁用服务商重试。具体限额唯一来源为 `pi-conversation.ts` 的 `PI_REPLY_LIMITS`，报价上限不是实际单价。自动压缩尚未启用，上下文超限明确失败，原文仍保存。
-- `pi-archive.ts` 将 pi 会话归档为数据库来源，保留每次实际 pi 上下文、provider payload、可见输出及工具往返。最终归档与回复在同一事务提交；失败检查点标为未完成，下次重建。仅完成且 `contextVersion` 相符、依赖仍有效的归档用于恢复。归档结构及已有库升级脚本分别见 `packages/db/src/schema-core.ts`、`packages/db/migrations/0001-pi-session-archives.sql`。
-- 来源失效传播同时清理相关 pi 归档、派生回复与幂等缓存。该代码路径不代表实例已升级或真实模型下的连续交流效果已通过，真实验证仍需在 Instabox 隔离测试资料中执行。
+- `reply-methods.ts` 将证据、低负担访谈、修订和决策方法的实际步骤加入回应上下文并记录版本；工具支持分词检索并排除当前消息，跨会话默认返回用户原话和必要问答背景，旧分析须显式展开。加载与检索成功不代表语义效果已通过。
+- `pi-archive.ts` 保留最新恢复检查点，最终归档与回复在同一事务提交；旧式含 `records` 的归档保留作既有审计材料，新式被替代检查点仅留元数据。只有完成、版本相符且依赖有效时才恢复，否则从数据库的有效会话材料重建。`pi-request-records.ts` 在发送前登记实际上下文与 provider payload，完成后更新同一请求记录，不反复复制整份会话；服务商报告费用、估算及预留分开，未知费用不记为零。结构与升级脚本见 `packages/db/src/schema-core.ts`、`packages/db/migrations/`。
+- 来源失效按每条回复的依赖清理 pi 归档、请求正文、派生回复与幂等缓存，无关回复保留；原始用户输入仍可用时回到待回应，被排除输入不能重新生成。该代码路径不代表实例已升级或真实模型下的连续交流效果已通过，真实验证仍需在 Instabox 隔离测试资料中执行。
 - 回应、综合、纠正三处提交统一复核：所用认识仍为当前版本且依据状态未变，所用材料仍有效、可用且评估版本相同；加锁顺序为对话、来源、认识，与来源变更一致。处理已保存的输入时，已结束的对话会重新打开。
 - 删除来源时，引用了受影响认识的直接回应被清空，对应消息回到“待回应”。
 - 知识专题中的“纠正这条”经 `POST /api/core/claim-revisions/:id/corrections` 进入同一纠正流程；专题的反馈入口只保留效用评价，后端旧的专题级纠正类型仍可接收但界面不再使用。

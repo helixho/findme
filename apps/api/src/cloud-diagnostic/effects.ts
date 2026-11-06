@@ -11,6 +11,19 @@ export async function invalidateCloudSources(
 ) {
   if (!ids.length) return { reports: 0, jobs: 0 };
   await lockPiProfileState(tx, ctx);
+  await tx
+    .update(c.piRequestRecords)
+    .set({ piInput: null, providerPayload: null, output: null, status: "stale" })
+    .where(
+      and(
+        eq(c.piRequestRecords.tenantId, ctx.tenantId),
+        eq(c.piRequestRecords.subjectId, ctx.subjectId),
+        sql`exists (select 1 from jsonb_array_elements(${c.piRequestRecords.dependencies}) dep where dep->>'sourceId' in (${sql.join(
+          ids.map((id) => sql`${id}`),
+          sql`, `,
+        )}))`,
+      ),
+    );
   // Snapshots contain tool results and compressed quotations as well as messages.
   // Exclusion and hard deletion both clear every matching historical revision.
   const invalidatedPiArchives = await tx
@@ -27,42 +40,70 @@ export async function invalidateCloudSources(
       ),
     )
     .returning({ conversationId: c.piSessionArchives.conversationId });
-  const piConversationIds = [...new Set(invalidatedPiArchives.map((row) => row.conversationId))];
-  if (piConversationIds.length) {
-    // Keep the established operation -> exploration lock order used by reply commits.
-    const piOperations = await tx
+  // A session checkpoint includes all preceding context, but individual replies
+  // have their own lineage. Invalidate only replies that actually used an input.
+  const replyOwners = await tx
+    .select({ source: c.sourceItems, assessment: c.sourceAssessments })
+    .from(c.sourceItems)
+    .leftJoin(
+      c.sourceAssessments,
+      and(
+        eq(c.sourceAssessments.sourceItemId, c.sourceItems.id),
+        eq(c.sourceAssessments.isCurrent, true),
+      ),
+    )
+    .where(
+      and(
+        eq(c.sourceItems.tenantId, ctx.tenantId),
+        eq(c.sourceItems.subjectId, ctx.subjectId),
+        sql`${c.sourceItems.sourceMeta}->'reply'->>'engine' = 'pi'`,
+        sql`exists (select 1 from jsonb_array_elements_text(case when jsonb_typeof(${c.sourceItems.sourceMeta}->'reply'->'source_ids') = 'array' then ${c.sourceItems.sourceMeta}->'reply'->'source_ids' else '[]'::jsonb end) dep where dep in (${sql.join(
+          ids.map((id) => sql`${id}`),
+          sql`, `,
+        )}))`,
+      ),
+    );
+  const ownerIds = replyOwners.map((row) => row.source.id);
+  const piConversationIds = [
+    ...new Set([
+      ...invalidatedPiArchives.map((row) => row.conversationId),
+      ...replyOwners.flatMap((row) =>
+        typeof row.source.sourceMeta?.exploration_id === "string"
+          ? [row.source.sourceMeta.exploration_id]
+          : [],
+      ),
+    ]),
+  ];
+  // Keep operation -> exploration -> source ordering, under the Profile lock.
+  if (ownerIds.length) {
+    const operations = await tx
       .select({ id: c.coreOperations.id })
       .from(c.coreOperations)
       .where(
         and(
           eq(c.coreOperations.tenantId, ctx.tenantId),
           eq(c.coreOperations.subjectId, ctx.subjectId),
-          sql`${c.coreOperations.explorationId}::text in (${sql.join(
-            piConversationIds.map((id) => sql`${id}`),
+          sql`${c.coreOperations.responseBody}->>'engine' = 'pi'`,
+          sql`${c.coreOperations.responseBody}->>'message_source_id' in (${sql.join(
+            ownerIds.map((id) => sql`${id}`),
             sql`, `,
           )})`,
-          sql`${c.coreOperations.responseBody}->>'engine' = 'pi'`,
         ),
       )
       .orderBy(c.coreOperations.id)
       .for("update");
-    if (piOperations.length)
+    if (operations.length)
       await tx
         .update(c.coreOperations)
-        .set({
-          responseBody: null,
-          responseStatus: null,
-          status: "stale",
-        })
+        .set({ responseBody: null, responseStatus: null, status: "stale" })
         .where(
           inArray(
             c.coreOperations.id,
-            piOperations.map((row) => row.id),
+            operations.map((row) => row.id),
           ),
         );
-    // A native reply can carry quotations from another session's source. Clear
-    // the derived pi turns as well as the private snapshot so later rebuilding
-    // cannot read those quotations back through the public conversation log.
+  }
+  if (piConversationIds.length) {
     const native = await tx
       .select({ id: c.explorations.id })
       .from(c.explorations)
@@ -79,42 +120,43 @@ export async function invalidateCloudSources(
       .orderBy(c.explorations.id)
       .for("update");
     const nativeIds = native.map((row) => row.id);
-    if (nativeIds.length) {
-      const cleared = await tx
+    const turnIds = replyOwners.flatMap((row) => {
+      const reply = row.source.sourceMeta?.reply as { turn_id?: unknown } | undefined;
+      return typeof reply?.turn_id === "string" ? [reply.turn_id] : [];
+    });
+    if (turnIds.length && nativeIds.length)
+      await tx
         .update(c.explorationTurns)
         .set({ content: "" })
         .where(
           and(
+            inArray(c.explorationTurns.id, turnIds),
             inArray(c.explorationTurns.explorationId, nativeIds),
             eq(c.explorationTurns.role, "assistant"),
             eq(c.explorationTurns.turnKind, "pi_reply"),
-            ne(c.explorationTurns.content, ""),
           ),
-        )
-        .returning({ id: c.explorationTurns.id });
-      if (cleared.length) {
-        const turnIds = cleared.map((row) => row.id);
-        await tx
-          .update(c.sourceItems)
-          .set({
-            sourceMeta: sql`jsonb_set(coalesce(${c.sourceItems.sourceMeta}, '{}'::jsonb), '{reply}', '{"redacted":true}'::jsonb)`,
-          })
-          .where(
-            and(
-              eq(c.sourceItems.tenantId, ctx.tenantId),
-              eq(c.sourceItems.subjectId, ctx.subjectId),
-              sql`${c.sourceItems.sourceMeta}->'reply'->>'turn_id' in (${sql.join(
-                turnIds.map((id) => sql`${id}`),
-                sql`, `,
-              )})`,
-            ),
-          );
-      }
+        );
+    for (const row of replyOwners) {
+      const usable =
+        row.source.usageStatus === "active" &&
+        row.assessment !== null &&
+        ["eligible", "context_only"].includes(row.assessment.eligibility);
+      await tx
+        .update(c.sourceItems)
+        .set({
+          sourceMeta: {
+            ...row.source.sourceMeta,
+            reply: { redacted: true },
+            reply_status: usable ? "pending" : "unavailable",
+          },
+        })
+        .where(eq(c.sourceItems.id, row.source.id));
+    }
+    if (nativeIds.length)
       await tx
         .update(c.explorations)
         .set({ version: sql`${c.explorations.version}+1` })
         .where(inArray(c.explorations.id, nativeIds));
-    }
   }
   const links = await tx
     .select()

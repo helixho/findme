@@ -374,6 +374,14 @@ CREATE POLICY account_runtime_scope ON pi_session_archives FOR ALL TO findme_run
  WITH CHECK (tenant_id::text=current_setting('app.tenant_id',true) AND subject_id::text=current_setting('app.subject_id',true));
 GRANT SELECT,INSERT,UPDATE,DELETE ON pi_session_archives TO findme_runtime;
 
+ALTER TABLE pi_request_records ENABLE ROW LEVEL SECURITY;
+ALTER TABLE pi_request_records FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS account_runtime_scope ON pi_request_records;
+CREATE POLICY account_runtime_scope ON pi_request_records FOR ALL TO findme_runtime
+ USING(tenant_id::text=current_setting('app.tenant_id',true) AND subject_id::text=current_setting('app.subject_id',true))
+ WITH CHECK(tenant_id::text=current_setting('app.tenant_id',true) AND subject_id::text=current_setting('app.subject_id',true));
+GRANT SELECT,INSERT,UPDATE,DELETE ON pi_request_records TO findme_runtime;
+
 COMMIT;
 
 -- Do not grant any of these group roles to the existing shared runtime account blindly.

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Deploy the application directly on the target Linux host; Docker hosts only PostgreSQL.
 set -Eeuo pipefail
-REPO=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+REPO=${FINDME_SOURCE_REPO:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)}
 STATE=${FINDME_STATE_DIR:-}
 if [[ -z $STATE ]]; then
   if [[ -d /data ]]; then STATE=/data/findme; else STATE=/var/lib/findme; fi
@@ -29,8 +29,7 @@ for command in node pnpm git systemctl; do command -v "$command" >/dev/null || {
 NODE=$(command -v node)
 "$NODE" -e 'const [a,b]=process.versions.node.split(".").map(Number); if(a<22||(a===22&&b<19)) throw Error("Node 22.19+ required")'
 [[ -d $REPO/.git && -z $(git -C "$REPO" status --porcelain) ]] || { echo 'Deploy a clean Git checkout; preserve local work first.' >&2; exit 1; }
-COMMIT=$(git -C "$REPO" rev-parse HEAD)
-[[ -z ${FINDME_DEPLOY_COMMIT:-} || $FINDME_DEPLOY_COMMIT == "$COMMIT" ]] || { echo 'Source commit mismatch.' >&2; exit 1; }
+COMMIT=$(git -C "$REPO" rev-parse "${FINDME_DEPLOY_COMMIT:-HEAD}^{commit}")
 SUDO=()
 if ((EUID != 0)); then SUDO=(sudo); fi
 "${SUDO[@]}" mkdir -p "$STATE"
@@ -68,17 +67,39 @@ if [[ -z $LOCATION || $LOCATION == postgres/findme ]]; then
   docker compose version >/dev/null
   docker compose --env-file "$ENV_FILE" -f "$REPO/deployment/standalone/compose.yaml" --profile local-db up -d --no-recreate --wait postgres
 fi
-mkdir -p "$STATE/files" "$STATE/pnpm-store"
-cd "$REPO"
-echo '[deploy] Installing locked dependencies and building Node API / static UI (no application Docker build)'
+mkdir -p "$STATE/files" "$STATE/pnpm-store" "$STATE/releases"
+RELEASE=$STATE/releases/$COMMIT
+PREVIOUS=$(readlink -f "$STATE/current" 2>/dev/null || true)
+# Never rebuild an active release in place, even when redeploying the same commit.
+if [[ $PREVIOUS == "$RELEASE" ]]; then
+  echo '[deploy] This release is already current; checking existing service'
+  "${SUDO[@]}" systemctl is-active --quiet findme-app
+  exit 0
+fi
+[[ ! -e $RELEASE ]] || { echo 'Incomplete release directory exists; inspect/remove it before retrying.' >&2; exit 1; }
+mkdir "$RELEASE"
+# Only new deployment artifacts are created. The currently served tree is untouched.
+cleanup_candidate() { rm -rf -- "$RELEASE"; }
+trap cleanup_candidate ERR
+git -C "$REPO" archive "$COMMIT" | tar -x -C "$RELEASE"
+cd "$RELEASE"
+echo '[deploy] Building isolated Node API / static UI release'
 CI=1 pnpm install --frozen-lockfile --store-dir "$STATE/pnpm-store"
 pnpm --filter @findme/api build
 VITE_CORE_API_BASE= VITE_APP_AUTH_MODE=account pnpm --filter @findme/app build
-"$NODE" "$REPO/scripts/native-runtime.mjs" --state-dir "$STATE" --repo-root "$REPO" --setup
+"$NODE" "$RELEASE/scripts/native-runtime.mjs" --state-dir "$STATE" --repo-root "$RELEASE" --setup
+# Schema migrations are not rolled back here; they must remain compatible with
+# the running release. No application pointer has changed if setup fails.
+trap - ERR
 
 # User-owned inputs and database stay in place; only application execution changes.
 SERVICE=/etc/systemd/system/findme-app.service
-"${SUDO[@]}" tee "$SERVICE" >/dev/null <<UNIT
+OLD_WORKDIR=$(systemctl show findme-app -p WorkingDirectory --value 2>/dev/null || true)
+# The existing service remains executable at its fixed directory during builds.
+write_service() {
+  local target=$1
+
+"${SUDO[@]}" tee "$SERVICE.next" >/dev/null <<UNIT
 [Unit]
 Description=FindMe direct Node application
 After=network-online.target docker.service
@@ -87,9 +108,9 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=$(id -un)
-WorkingDirectory=$REPO
+WorkingDirectory=$target
 Environment=PATH=$(dirname "$NODE"):/usr/local/bin:/usr/bin:/bin
-ExecStart=$NODE $REPO/scripts/native-runtime.mjs --state-dir $STATE --repo-root $REPO
+ExecStart=$NODE $target/scripts/native-runtime.mjs --state-dir $STATE --repo-root $target
 Restart=on-failure
 RestartSec=3
 KillMode=mixed
@@ -98,9 +119,41 @@ TimeoutStopSec=120
 [Install]
 WantedBy=multi-user.target
 UNIT
+"${SUDO[@]}" mv -f "$SERVICE.next" "$SERVICE"
+}
+OLD_COMMIT=$(cat "$STATE/deployed-commit" 2>/dev/null || true)
+LEGACY_APP=$(docker ps -aq --filter label=com.docker.compose.project=findme --filter label=com.docker.compose.service=app 2>/dev/null || true)
+restore_activation() {
+  local code=$?
+  trap - ERR
+  set +e
+  local restored=0
+  if [[ -n $OLD_WORKDIR && -f $OLD_WORKDIR/scripts/native-runtime.mjs ]]; then
+    if write_service "$OLD_WORKDIR" && "${SUDO[@]}" systemctl daemon-reload && "${SUDO[@]}" systemctl restart findme-app; then restored=1; fi
+  elif [[ -n $LEGACY_APP ]]; then
+    "${SUDO[@]}" systemctl disable --now findme-app >/dev/null
+    if docker start "$LEGACY_APP" >/dev/null; then restored=1; fi
+  else
+    "${SUDO[@]}" systemctl disable --now findme-app >/dev/null
+    restored=1
+  fi
+  if ((restored)); then
+    if [[ -n $PREVIOUS && -d $PREVIOUS ]]; then
+      ln -sfn "$PREVIOUS" "$STATE/current.next"
+      mv -Tf "$STATE/current.next" "$STATE/current"
+    else rm -f "$STATE/current" "$STATE/current.next"; fi
+    if [[ -n $OLD_COMMIT ]]; then printf '%s\n' "$OLD_COMMIT" > "$STATE/deployed-commit"; else rm -f "$STATE/deployed-commit"; fi
+    rm -rf -- "$RELEASE"
+    echo 'Application activation failed; previous application restored. Schema changes were not rolled back.' >&2
+  else
+    echo 'Application activation failed and previous service could not restart; candidate retained for diagnosis. Schema changes were not rolled back.' >&2
+  fi
+  exit "$code"
+}
+trap restore_activation ERR
+write_service "$RELEASE"
 "${SUDO[@]}" systemctl daemon-reload
 # Stop only the legacy app, never compose down or the PostgreSQL container.
-LEGACY_APP=$(docker ps -aq --filter label=com.docker.compose.project=findme --filter label=com.docker.compose.service=app 2>/dev/null || true)
 if [[ -n $LEGACY_APP ]]; then docker stop --time 120 "$LEGACY_APP" >/dev/null; fi
 "${SUDO[@]}" systemctl enable findme-app >/dev/null
 "${SUDO[@]}" systemctl restart findme-app
@@ -109,16 +162,12 @@ for ((i=0;i<60;i++)); do
   if FINDME_CHECK_PORT=$PORT "$NODE" --input-type=module -e 'for(const p of ["/", "/health?strict=1", "/ready"]){ const r=await fetch("http://127.0.0.1:"+process.env.FINDME_CHECK_PORT+p,{signal:AbortSignal.timeout(1500)});if(!r.ok)process.exit(1);}' >/dev/null 2>&1; then READY=1; break; fi
   sleep 1
 done
-if (( ! READY )); then
-  echo 'Direct application did not become ready; inspect journalctl -u findme-app.' >&2
-  if [[ -n $LEGACY_APP ]]; then
-    "${SUDO[@]}" systemctl disable --now findme-app >/dev/null
-    docker start "$LEGACY_APP" >/dev/null
-    echo 'Previous application restored; direct-run deployment remains incomplete.' >&2
-  fi
-  exit 1
-fi
-# A stopped legacy app must not reclaim the port after a future Docker restart.
-if [[ -n $LEGACY_APP ]]; then docker rm "$LEGACY_APP" >/dev/null; fi
+((READY)) || { echo 'New application did not become ready.' >&2; false; }
+ln -sfn "$RELEASE" "$STATE/current.next"
+mv -Tf "$STATE/current.next" "$STATE/current"
 printf '%s\n' "$COMMIT" > "$STATE/deployed-commit"
+trap - ERR
+# Retire only the previously active release, after the new release is healthy.
+if [[ -n $LEGACY_APP ]]; then docker rm "$LEGACY_APP" >/dev/null; fi
+if [[ $PREVIOUS == "$STATE/releases/"* && $PREVIOUS != "$RELEASE" ]]; then rm -rf -- "$PREVIOUS"; fi
 printf '\nFindMe ready: %s (Node / systemd findme-app; database preserved)\n' "$PUBLIC_URL"

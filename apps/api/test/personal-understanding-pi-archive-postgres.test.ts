@@ -132,7 +132,6 @@ it("archives pi sources idempotently, isolates Profiles, and clears every snapsh
     });
     const sql = new SqlPiArchiveDatabase(db.db);
     const repository = new PiArchiveRepository(sql);
-    const dependencies = await sql.captureDependencies(ctx, [source.id]);
     const sessionId = randomUUID();
     const archive = {
       format: "findme-pi-session@1" as const,
@@ -194,7 +193,11 @@ it("archives pi sources idempotently, isolates Profiles, and clears every snapsh
           requestHash: "synthetic",
           status: "completed",
           responseStatus: 201,
-          responseBody: { engine: "pi", reply: "quoted from excluded source" },
+          responseBody: {
+            engine: "pi",
+            message_source_id: source.id,
+            reply: "quoted from excluded source",
+          },
         })
         .returning();
       const [legacyOperation] = await tx
@@ -218,6 +221,13 @@ it("archives pi sources idempotently, isolates Profiles, and clears every snapsh
         legacyOperationId: legacyOperation!.id,
       };
     });
+    await withProfileTransaction(db.db, ctx, (tx) =>
+      tx
+        .update(coreSchema.sourceItems)
+        .set({ sourceMeta: { exploration_id: native.conversationId } })
+        .where(eq(coreSchema.sourceItems.id, source.id)),
+    );
+    const dependencies = await sql.captureDependencies(ctx, [source.id]);
     const input = {
       scope: ctx,
       conversationId: native.conversationId,
@@ -275,7 +285,13 @@ it("archives pi sources idempotently, isolates Profiles, and clears every snapsh
           sourceMeta: {
             reply_status: "replied",
             understanding_status: "pending",
-            reply: { output: "synthetic reply", turn_id: native.piTurnId },
+            exploration_id: native.conversationId,
+            reply: {
+              engine: "pi",
+              source_ids: [source.id],
+              output: "synthetic reply",
+              turn_id: native.piTurnId,
+            },
           },
         })
         .where(eq(coreSchema.sourceItems.id, source.id));
@@ -350,6 +366,7 @@ it("archives pi sources idempotently, isolates Profiles, and clears every snapsh
     );
     expect(afterInvalidation.sources[0]?.content).toBe("changed original");
     expect(afterInvalidation.sources[0]?.sourceMeta?.reply).toEqual({ redacted: true });
+    expect(afterInvalidation.sources[0]?.sourceMeta?.reply_status).toBe("unavailable");
     const invalidatedOperation = afterInvalidation.operations.find(
       (op) => op.id === native.operationId,
     );

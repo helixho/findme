@@ -10,7 +10,7 @@
 curl -fsSL https://raw.githubusercontent.com/helixho/findme/main/scripts/bootstrap-deploy.sh | bash
 ```
 
-bootstrap 自行 clone/fetch 远端 main，检出确切提交，再执行该提交内的 `scripts/install-deploy.sh`。已有仓库有本地修改时停止，避免覆盖。默认源码目录 `/data/workspace/findme`，状态目录 `/data/findme`；缺少 `/data` 时分别使用 `~/workspace/findme` 和 `/var/lib/findme`。`FINDME_CHECKOUT`、`FINDME_STATE_DIR`、`FINDME_REF` 可以覆盖这些默认值。
+bootstrap 自行 clone/fetch 远端 main，读取确切提交中的安装器；不会 checkout 正在运行的源码目录。安装器将该提交归档到状态目录的 `releases/<commit>/`，在独立目录安装依赖和构建。已有仓库有本地修改时停止，避免覆盖。默认源码目录 `/data/workspace/findme`，状态目录 `/data/findme`；缺少 `/data` 时分别使用 `~/workspace/findme` 和 `/var/lib/findme`。`FINDME_CHECKOUT`、`FINDME_STATE_DIR`、`FINDME_REF` 可以覆盖这些默认值。
 
 已有干净 Git checkout 也可执行 `./scripts/install-deploy.sh`，安装该 checkout 的提交；更新到远端新版本使用 bootstrap。安装器支持 `--state-dir`、`--port`、`--public-url` 和 `--no-publish`，详见 `--help`。
 
@@ -34,7 +34,7 @@ bootstrap 自行 clone/fetch 远端 main，检出确切提交，再执行该提�
 
 ## 数据库结构
 
-新库按 `packages/db/schema.sql` 建表；已有库在部署时自动执行 `packages/db/migrations/` 中尚未执行的升级脚本，数据保留，规则见该目录的说明。升级后仍缺少当前版本需要的表或字段时，部署以 `DATABASE_STRUCTURE_MISMATCH` 停止，旧版本继续运行。
+新库按 `packages/db/schema.sql` 建表；已有库在部署时自动执行 `packages/db/migrations/` 中尚未执行的升级脚本，数据保留，规则见该目录的说明。升级失败时不切换应用入口。数据库迁移自身不自动回滚，因此迁移必须保持与当前应用兼容；不兼容迁移需另行安排，不能承诺旧应用仍完全可用。
 
 ## 后台任务与休眠
 
@@ -61,3 +61,9 @@ journalctl -u findme-app -n 100 --no-pager
 应用状态使用 `systemctl status findme-app` 查看；Compose 仅用于数据库，应用提交以状态目录的 `deployed-commit` 核对。
 
 合成部署验证入口为 `scripts/verify-standalone.mjs`（Node 22+），读取 `FINDME_VERIFY_ENV_FILE`，默认 `/data/findme/runtime.env`。首次运行创建合成 Profile、专题和原档，第二次加 `verify` 参数核对持久结果；`FINDME_VERIFY_STATE` 指定两次共用的临时回执路径。仅在模型调用关闭时运行。`FINDME_BROWSER_CDP` 可连接独立测试 Chromium，验证桌面与手机视口无登录进入、刷新和布局。
+
+## 发布切换与失败边界
+
+应用进程、静态文件与依赖固定在同一个 release 绝对目录。安装、构建、初始化完成后才更新 systemd 并启动新版本；健康检查通过后更新 `current` 与 `deployed-commit`，然后清理前一个 release。`current` 是发布标记，运行进程不依赖可变软链作为工作目录。首次从原源码目录迁移时，原目录不被 checkout、安装或构建覆盖。
+
+构建或初始化失败会删除未发布候选目录，不改变原服务。新应用启动失败时恢复原 systemd 运行目录；这只恢复应用执行，不撤销已执行的数据库迁移。保留当前正在运行的产物直到新版本通过检查，不额外复制旧版本作为备份。
