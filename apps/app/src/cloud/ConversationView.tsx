@@ -471,16 +471,14 @@ export function ConversationView({ resumeId }: { resumeId?: string | null } = {}
       {step.kind === "saved" && (
         <div className="conversation-saved">
           <p>已保存。{step.note}</p>
-          {step.pending && (
-            <button
-              type="button"
-              className="button secondary"
-              disabled={busy}
-              onClick={() => void run(() => resume(step.id, false))}
-            >
-              刷新状态
-            </button>
-          )}
+          <button
+            type="button"
+            className="button secondary"
+            disabled={busy}
+            onClick={() => void run(() => resume(step.id, false))}
+          >
+            刷新状态
+          </button>
           {/* Safe while pending too: the same request reuses its retained key. */}
           <button
             type="button"

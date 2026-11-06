@@ -500,6 +500,67 @@ test("conversation retries a still-processing run with the same request identity
   expect(continues[1]).toBe(continues[0]);
 });
 
+test("a failed continue can refresh a completed result without another model request", async ({
+  page,
+}) => {
+  let continues = 0;
+  await setup(page, async (route, path) => {
+    const method = route.request().method();
+    if (path === "/api/core/model-status")
+      return json(route, {
+        enabled: true,
+        window_hours: 24,
+        operation_limit: 30,
+        operations_used: 0,
+      }).then(() => true);
+    if (path === "/api/core/understanding")
+      return json(route, { state: "empty", claims: [], needs_review: [] }).then(() => true);
+    if (path === "/api/core/explorations" && method === "GET")
+      return json(route, { items: [] }).then(() => true);
+    if (path === "/api/core/explorations" && method === "POST")
+      return json(
+        route,
+        {
+          exploration: { id: "recovery", status: "active", version: 10 },
+          experience: { id: "x", summary: "已保存的经历" },
+          phase: "ready_to_plan",
+          saved: true,
+        },
+        201,
+      ).then(() => true);
+    if (path === "/api/core/explorations/recovery/continue") {
+      continues++;
+      // A reverse proxy may lose the HTTP reply after the work has committed.
+      await route.fulfill({ status: 502, contentType: "text/plain", body: "bad gateway" });
+      return true;
+    }
+    if (path === "/api/core/explorations/recovery")
+      return json(route, {
+        id: "recovery",
+        version: 11,
+        status: "active",
+        phase: "review",
+        open_question: null,
+        latest_step: { current_reading: "已经完成的综合结果。", key_uncertainty: null },
+        experience: { id: "x", summary: "已保存的经历", occurred_at: null, context: {} },
+        turns: [{ id: "t", role: "user", turnKind: "event", content: "这段经历已经保存。" }],
+        pending: { corrections: [], messages: [], updates: [] },
+        understanding: { outcome: "provisional", claims: [], gaps: [], needs_review: [] },
+      }).then(() => true);
+    return false;
+  });
+  await page.getByRole("button", { name: "对话" }).click();
+  await page.getByLabel("说说一件具体的事").fill("这段经历已经保存。");
+  await page.getByRole("button", { name: "保存并继续" }).click();
+  await expect(page.getByText(/暂时无法确认处理结果/)).toBeVisible();
+  await page.getByRole("button", { name: "刷新状态" }).click();
+  await expect(page.getByText("已经完成的综合结果。")).toBeVisible();
+  await expect(page.locator(".conversation-thread .thread-user")).toHaveText(
+    "我：这段经历已经保存。",
+  );
+  expect(continues).toBe(1);
+});
+
 test("correcting one claim keeps the other claims of the result", async ({ page }) => {
   const claim = (id: string, text: string) => ({
     claim_id: `c-${id}`,

@@ -84,8 +84,26 @@ export const labels: Record<string, string> = {
   superseded: "已被后续版本替代",
   processed: "已处理",
 };
+const modelErrors: Record<string, string> = {
+  LLM_TIMEOUT: "模型响应超时，可以稍后重新处理。",
+  LLM_PROVIDER: "模型服务暂时无法响应，可以稍后重新处理。",
+  LLM_QUOTA: "模型服务额度不足，请检查模型设置。",
+  LLM_RATE_LIMIT: "模型服务请求受限，可以稍后重新处理。",
+  LLM_AUTHENTICATION: "模型服务认证失败，请检查模型设置。",
+  LLM_MODEL_NOT_FOUND: "所选模型不可用，请检查模型设置。",
+  LLM_BAD_REQUEST: "模型服务未接受请求，请检查模型设置。",
+  LLM_JSON_PARSE: "模型未返回可用结果，可以稍后重新处理。",
+  LLM_SCHEMA_VALIDATION: "模型返回结果不符合要求，可以稍后重新处理。",
+};
 export const message = (error: unknown) =>
-  error instanceof CloudApiError ? error.code : error instanceof Error ? error.message : "操作失败";
+  error instanceof CloudApiError
+    ? (modelErrors[error.code] ??
+      (error.status >= 500 && (error.code === "internal" || /^HTTP_5\d{2}$/.test(error.code))
+        ? "暂时无法确认处理结果，请先刷新状态。"
+        : error.code))
+    : error instanceof Error
+      ? error.message
+      : "操作失败";
 export function download(name: string, body: Blob) {
   const url = URL.createObjectURL(body);
   const a = document.createElement("a");

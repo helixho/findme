@@ -45,7 +45,7 @@ describe("current source policy registry", () => {
     expect(core.map((entry) => entry.identifiers.map((item) => item.value))).toEqual([
       [
         "epistemic-policy@v1",
-        "purposeful-planner-prompt@v5",
+        "purposeful-planner-prompt@v6",
         "exploration-plan-validator@v2",
         "purposeful-exploration@v1",
       ],

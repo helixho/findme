@@ -340,7 +340,7 @@ dbDescribe("Core reliability", () => {
     expect(steps).toHaveLength(1);
     const meta = steps[0]?.modelMeta as Record<string, unknown>;
     expect(meta.policy_version).toBe("epistemic-policy@v1");
-    expect(meta.prompt_version).toBe("purposeful-planner-prompt@v5");
+    expect(meta.prompt_version).toBe("purposeful-planner-prompt@v6");
     expect(meta.model_route).toBe("observation_model");
     expect(meta.model_version).toBe("test-observation-model");
     expect(meta.validator_version).toBe("exploration-plan-validator@v2");
@@ -1101,7 +1101,7 @@ dbDescribe("Core reliability", () => {
     expect(meta?.input_fingerprint).toBe(
       inputFingerprint([
         "epistemic-policy@v1",
-        "purposeful-planner-prompt@v5",
+        "purposeful-planner-prompt@v6",
         "exploration-plan-validator@v2",
         "observation_model",
         "test-observation-model",

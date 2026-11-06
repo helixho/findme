@@ -141,4 +141,34 @@ describe("account HTTP response boundaries", () => {
     expect(keys[1]).toBe(keys[0]);
     expect(keys[2]).not.toBe(keys[1]);
   });
+  it("keeps a saved operation recoverable after a non-JSON gateway error", async () => {
+    const cloud = await api();
+    cloud.selectCloudProfile("p");
+    const keys: string[] = [];
+    const replies = [
+      new Response("upstream temporarily unavailable", { status: 502 }),
+      Response.json({ phase: "review", version: 11 }),
+      Response.json({ phase: "review", version: 11 }),
+    ];
+    const fetch = vi.fn(async (_url: string, init: RequestInit) => {
+      keys.push(new Headers(init.headers).get("Idempotency-Key") ?? "");
+      return replies.shift()!;
+    });
+    vi.stubGlobal("fetch", fetch);
+    const path = "/api/core/explorations/e/continue";
+    const input = { expected_version: 10 };
+    await expect(cloud.cloudMutation(path, input)).rejects.toMatchObject({
+      status: 502,
+      code: "HTTP_502",
+    });
+    // Recovery is explicitly requested, never an automatic extra model call.
+    expect(fetch).toHaveBeenCalledTimes(1);
+    await expect(cloud.cloudMutation(path, input)).resolves.toEqual({
+      phase: "review",
+      version: 11,
+    });
+    await cloud.cloudMutation(path, input);
+    expect(keys[1]).toBe(keys[0]);
+    expect(keys[2]).not.toBe(keys[1]);
+  });
 });

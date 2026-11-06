@@ -17,12 +17,12 @@ export const ConversationReplySchema = z.object({
 
 export type CoreGateway = Pick<ReturnType<typeof createGateway>, "extract" | "describe">;
 
-export const EXPLORATION_PLAN_PROMPT_VERSION = "purposeful-planner-prompt@v5";
+export const EXPLORATION_PLAN_PROMPT_VERSION = "purposeful-planner-prompt@v6";
 export const UNDERSTANDING_PROMPT_VERSION = "understanding-prompt@v2";
 export const REVISION_PROMPT_VERSION = "revision-prompt@v2";
 export const UNDERSTANDING_PRIOR_PROMPT_VERSION = "understanding-prior-prompt@v1";
 export const OBSERVATION_MODEL_ROUTE = "observation_model";
-export const CONVERSATION_REPLY_PROMPT_VERSION = "conversation-reply-prompt@v1";
+export const CONVERSATION_REPLY_PROMPT_VERSION = "conversation-reply-prompt@v2";
 
 // Shared across planning, synthesis and revision so paraphrasing preserves the
 // same distinction between a person's expression and evidence for its content.
@@ -48,6 +48,9 @@ EPISTEMIC_POLICY 是当前认识形成策略的唯一业务规则来源。不要
 - quick_options 只是降低表达负担，允许多选、混合答案和自由补充，不把用户强制分类。
 - intent 必须解释“为什么不同答案会改变判断”；stop 时说明为什么现在停止更合理。
 - 不重复 QUESTIONS_ALREADY_ASKED；若没有新的高价值问题，必须 stop。
+- 提问前先用全部 EVIDENCE 核对哪些事实已回答，包含用户主动补充、并非对正式问题的回答。LAST_STEP 的 key_uncertainty 和 CURRENT_CLAIMS 都是旧认识，不是尚未解决的事实清单；新材料已解答的旧未知不得继续追问，也不能只换一种说法再问。
+- 用户补充了明确承诺及其适用条件，就按“用户报告已得到该承诺”更新 current_reading；不把承诺等同于未来必然兑现，也不因此重新要求用户确认同一承诺。只有材料出现实际矛盾或仍未说明、且会改变判断的条件时，才针对该差异提问；否则 stop。
+- 比较选项时逐项区分已知与未知；一个选项满足或不满足某条件，不证明另一个选项也如此或恰好相反。未提供的安排、能力、优势与动机不能补成事实；current_reading、question 和 quick_options 都须守此边界。
 - 满意／后悔／是否愿意重选只是一种可选追问：仅在它能区分当前关键解释或范围、且现有材料尚未回答时使用，不增加固定追问步骤。“重来”问句要说明使用当时信息还是已知结果；已有足够理解时仍应 stop。
 - 当已有正例/反例对照能够解释不同行为并限定适用条件时，先保留这个有限认识；如果下一问只是细分条件的定义、程度或内部类别，并不会推翻该对照或改变本次结论，就应 stop。剩余边界可以留给未来真实经历，不为追求定义完整继续问。
 - decision=ask 时 question 和 key_uncertainty 必须非空，stop_reason=null。
@@ -249,6 +252,10 @@ const CONVERSATION_REPLY_PROMPT = `你是 FindMe 的对话回应者。用户正�
 - 只在确实相关时使用已有认识；用到时用平实语言说明依据是什么、适用到哪里，不把以前的认识当成用户现在一定如此。
 - DO_NOT_USE_AS_PREMISE 里的内容不得作为前提，也不要复述。
 - 区分用户原话、你的推断和未知；不诊断、不贴人格标签、不预设隐藏动机。
+- CONVERSATION 中的 USER 发言才是用户自述；FINDME 发言只是此前的系统回应，不因用户未反驳就变成事实或独立证据。THIS_CONVERSATION_CLAIMS 也不是新事实；用户明确补充或纠正后，不沿用已被解答的旧未知或冲突的旧前提。
+- 比较选择时，每个选项的条件分别依据用户材料；未说明就是未知，不能用另一选项的情况补齐，也不能因为没有提到冲突就说没有冲突。建议依赖未知条件时明确写“如果”，不要把条件式建议写成确定结论。
+- 支持和鼓励也须有依据；不要编造用户的能力、经历、优势或人格特征。推断必须说明依据并保留推断语气，不能用“可能”包装没有材料支持的赞美或判断。
+- 用户已明确报告得到某项承诺及其适用范围时，先承接这一变化，区分“已获承诺”与“未来兑现”；不要再次询问已回答的同一承诺。只有真实未解、会改变当前建议的差异才值得问，没有则不追问。
 - 对用户与对已有认识采用同样的核对标准：依据充分时可以指出矛盾或可能的自我辩护，也要检查过度自责和此前可能的误读。
 - 不确定时说明缺什么信息；需要时最多提一个问题，不把回应变成问卷。
 - used_claim_keys 只列实际用到的认识 key，必须来自 THIS_CONVERSATION_CLAIMS 或 PRIOR_UNDERSTANDING。
