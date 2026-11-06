@@ -1,6 +1,6 @@
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { type Db, coreSchema as c } from "@findme/db";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, notInArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { withProfileTransaction } from "../cloud-diagnostic/scope.js";
 import type { PersonalContext } from "../core/exploration-types.js";
@@ -16,7 +16,11 @@ export function createPiReadTools(
   db: Db,
   ctx: PersonalContext,
   seed: readonly PiArchiveDependency[] = [],
-  options: { currentMessageId?: string } = {},
+  options: {
+    currentMessageId?: string;
+    currentConversationId?: string;
+    withheldSourceIds?: string[];
+  } = {},
 ): { tools: ToolDefinition[]; dependencies: () => PiArchiveDependency[] } {
   const dependencies = new Map(seed.map((d) => [d.sourceId, d.fingerprint]));
   const collect = (items: readonly PiArchiveDependency[]) => {
@@ -29,6 +33,7 @@ export function createPiReadTools(
   };
   const read = async (id: string, includeAnalysis = false) =>
     withProfileTransaction(db, ctx, async (tx) => {
+      if (options.withheldSourceIds?.includes(id)) throw new Error("SOURCE_NOT_AVAILABLE");
       const deps = await capturePiDependencies(tx, ctx, [id]);
       const [source] = await tx
         .select()
@@ -177,6 +182,9 @@ export function createPiReadTools(
                 eq(c.sourceItems.usageStatus, "active"),
                 sql`${c.sourceAssessments.eligibility} in ('eligible','context_only')`,
                 ...terms.map((term) => sql`position(${term} in lower(${c.sourceItems.content}))>0`),
+                options.withheldSourceIds?.length
+                  ? notInArray(c.sourceItems.id, options.withheldSourceIds)
+                  : undefined,
                 options.currentMessageId
                   ? sql`${c.sourceItems.id} <> ${options.currentMessageId}`
                   : undefined,
@@ -252,6 +260,8 @@ export function createPiReadTools(
           .parse(input);
         const result = await new NativeConversationReader(db).read(ctx, {
           conversationId: args.id,
+          beforeSourceId:
+            args.id === options.currentConversationId ? options.currentMessageId : undefined,
           includeAnalysis: args.include_analysis ?? false,
           cursor: args.cursor,
           limit: args.limit,

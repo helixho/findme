@@ -1,6 +1,7 @@
 import { CoreReportTarget } from "@findme/core";
 import { type Db, coreSchema } from "@findme/db";
 import { and, desc, eq } from "drizzle-orm";
+import { orderStoredConversationTurns } from "./conversation-context.js";
 import { loadPendingInputs } from "./conversation.js";
 import { PURPOSEFUL_EXPLORATION_POLICY } from "./epistemic-policy.js";
 import { deriveExplorationPhase, hasPriorProcessing } from "./exploration-context.js";
@@ -99,7 +100,7 @@ export async function getExplorationView(db: Db, ctx: PersonalContext, explorati
         .select()
         .from(coreSchema.explorationTurns)
         .where(eq(coreSchema.explorationTurns.explorationId, exploration.id))
-        .orderBy(coreSchema.explorationTurns.createdAt),
+        .orderBy(coreSchema.explorationTurns.createdAt, coreSchema.explorationTurns.id),
       loadCurrentClaimRows(db, ctx, exploration.id),
       loadOpenGaps(db, exploration.id),
       buildEvidenceView(db, ctx, exploration.experienceId),
@@ -201,7 +202,7 @@ export async function getExplorationView(db: Db, ctx: PersonalContext, explorati
       quick_options: question.quickOptions ?? [],
       answered_at: question.answeredAt,
     })),
-    turns,
+    turns: await orderStoredConversationTurns(db, ctx, turns),
     understanding: {
       outcome,
       claims: validClaims.map(mapClaim),

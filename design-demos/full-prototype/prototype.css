@@ -2304,3 +2304,6 @@ dialog.modal {
  .composer-foot .small { font-size:11px; }
  .daily-composer { padding:12px; }
 }
+/* 聊天页已有状态预览入口，避免全局原型浮钮遮住发送。 */
+body:has(.daily-chat) .proto-fab { display: none; }
+.talk-messages { overflow-wrap: anywhere; }

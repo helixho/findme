@@ -1,13 +1,15 @@
 import { type Db, coreSchema as c } from "@findme/db";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { withProfileTransaction } from "../cloud-diagnostic/scope.js";
+import { orderConversationReplies } from "../core/conversation-context.js";
 import type { PersonalContext } from "../core/exploration-types.js";
 import { capturePiDependencies } from "./pi-archive.js";
 import { capturePiReplyLineage } from "./pi-lineage.js";
 
 const Input = z.object({
   conversationId: z.string().uuid(),
+  beforeSourceId: z.string().uuid().optional(),
   includeAnalysis: z.boolean().default(false),
   cursor: z.number().int().nonnegative().default(0),
   limit: z.number().int().min(1).max(30).default(10),
@@ -57,9 +59,10 @@ export class NativeConversationReader {
       if (!conversation) throw new Error("CONVERSATION_NOT_AVAILABLE");
       // Check the whole thread before paging: an excluded early input must not
       // reappear indirectly through a later assistant reply on a different page.
-      const metadata = await tx
+      const rawMetadata = await tx
         .select({
           sourceId: c.explorationTurns.sourceItemId,
+          sourceMeta: c.sourceItems.sourceMeta,
           turnId: c.explorationTurns.id,
           turnKind: c.explorationTurns.turnKind,
           role: c.explorationTurns.role,
@@ -77,7 +80,21 @@ export class NativeConversationReader {
             eq(c.sourceAssessments.isCurrent, true),
           ),
         )
-        .where(eq(c.explorationTurns.explorationId, conversation.id));
+        .where(eq(c.explorationTurns.explorationId, conversation.id))
+        .orderBy(asc(c.explorationTurns.createdAt), asc(c.explorationTurns.id));
+      const orderedMetadata = orderConversationReplies(
+        rawMetadata.map((row) => ({ ...row, id: row.turnId })),
+        rawMetadata.flatMap((row) => {
+          const reply = row.sourceMeta?.reply as { turn_id?: unknown } | undefined;
+          return row.role === "user" && typeof reply?.turn_id === "string"
+            ? [{ inputTurnId: row.turnId, replyTurnId: reply.turn_id }]
+            : [];
+        }),
+      );
+      const cutoff = input.beforeSourceId
+        ? orderedMetadata.findIndex((row) => row.sourceId === input.beforeSourceId)
+        : -1;
+      const metadata = cutoff >= 0 ? orderedMetadata.slice(0, cutoff) : orderedMetadata;
       const allowed = (row: (typeof metadata)[number]) =>
         row.sourceId !== null &&
         row.ownerTenant === ctx.tenantId &&
@@ -104,25 +121,34 @@ export class NativeConversationReader {
       ];
       const assistantAllowed = (turn: { id: string; turnKind: string }) =>
         turn.turnKind === "pi_reply" ? !lineage.unavailableTurnIds.includes(turn.id) : !stale;
-      const rows = await tx
-        .select({
-          turn: c.explorationTurns,
-          source: c.sourceItems,
-          assessment: c.sourceAssessments,
-        })
-        .from(c.explorationTurns)
-        .leftJoin(c.sourceItems, eq(c.explorationTurns.sourceItemId, c.sourceItems.id))
-        .leftJoin(
-          c.sourceAssessments,
-          and(
-            eq(c.sourceAssessments.sourceItemId, c.sourceItems.id),
-            eq(c.sourceAssessments.isCurrent, true),
-          ),
-        )
-        .where(eq(c.explorationTurns.explorationId, conversation.id))
-        .orderBy(asc(c.explorationTurns.createdAt), asc(c.explorationTurns.id))
-        .limit(input.limit + 1)
-        .offset(input.cursor);
+      const page = metadata.slice(input.cursor, input.cursor + input.limit + 1);
+      const fetchedRows = page.length
+        ? await tx
+            .select({
+              turn: c.explorationTurns,
+              source: c.sourceItems,
+              assessment: c.sourceAssessments,
+            })
+            .from(c.explorationTurns)
+            .leftJoin(c.sourceItems, eq(c.explorationTurns.sourceItemId, c.sourceItems.id))
+            .leftJoin(
+              c.sourceAssessments,
+              and(
+                eq(c.sourceAssessments.sourceItemId, c.sourceItems.id),
+                eq(c.sourceAssessments.isCurrent, true),
+              ),
+            )
+            .where(
+              and(
+                eq(c.explorationTurns.explorationId, conversation.id),
+                inArray(
+                  c.explorationTurns.id,
+                  page.map((row) => row.turnId),
+                ),
+              ),
+            )
+        : [];
+      const rows = page.flatMap((item) => fetchedRows.filter((row) => row.turn.id === item.turnId));
       const usable = (row: (typeof rows)[number]) =>
         row.source !== null &&
         row.source.tenantId === ctx.tenantId &&
@@ -136,10 +162,16 @@ export class NativeConversationReader {
         const [previous] = await tx
           .select({ turn: c.explorationTurns })
           .from(c.explorationTurns)
-          .where(eq(c.explorationTurns.explorationId, conversation.id))
-          .orderBy(asc(c.explorationTurns.createdAt), asc(c.explorationTurns.id))
-          .limit(1)
-          .offset(input.cursor - 1);
+          .where(
+            and(
+              eq(c.explorationTurns.explorationId, conversation.id),
+              eq(
+                c.explorationTurns.id,
+                metadata[input.cursor - 1]?.turnId ?? "00000000-0000-0000-0000-000000000000",
+              ),
+            ),
+          )
+          .limit(1);
         if (previous?.turn.role === "assistant" && assistantAllowed(previous.turn))
           precedingQuestion = questionBackground(previous.turn.content) || null;
       }

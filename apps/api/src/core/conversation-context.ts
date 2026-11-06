@@ -80,6 +80,60 @@ export async function qualifyConversationSources(
   );
 }
 
+/** A delayed/rebuilt reply belongs immediately after the input it answers. */
+export function orderConversationReplies<T extends { id: string; role: string }>(
+  turns: T[],
+  links: Array<{ inputTurnId: string; replyTurnId: string }>,
+): T[] {
+  const byId = new Map(turns.map((turn) => [turn.id, turn]));
+  const valid = links.filter(
+    (link) =>
+      byId.get(link.inputTurnId)?.role === "user" &&
+      byId.get(link.replyTurnId)?.role === "assistant",
+  );
+  const replyIds = new Set(valid.map((link) => link.replyTurnId));
+  return turns
+    .filter((turn) => !replyIds.has(turn.id))
+    .flatMap((turn) => [
+      turn,
+      ...valid
+        .filter((link) => link.inputTurnId === turn.id)
+        .flatMap((link) => {
+          const reply = byId.get(link.replyTurnId);
+          return reply ? [reply] : [];
+        }),
+    ]);
+}
+
+export async function orderStoredConversationTurns<T extends ConversationTurn & { id: string }>(
+  db: Pick<Db, "select">,
+  ctx: PersonalContext,
+  turns: T[],
+) {
+  const ids = turns.flatMap((turn) => (turn.sourceItemId ? [turn.sourceItemId] : []));
+  if (!ids.length) return turns;
+  const sources = await db
+    .select({ id: c.sourceItems.id, meta: c.sourceItems.sourceMeta })
+    .from(c.sourceItems)
+    .where(
+      and(
+        inArray(c.sourceItems.id, ids),
+        eq(c.sourceItems.tenantId, ctx.tenantId),
+        eq(c.sourceItems.subjectId, ctx.subjectId),
+      ),
+    );
+  return orderConversationReplies(
+    turns,
+    sources.flatMap((source) => {
+      const reply = source.meta?.reply as { turn_id?: unknown } | undefined;
+      const input = turns.find((turn) => turn.sourceItemId === source.id && turn.role === "user");
+      return input && typeof reply?.turn_id === "string"
+        ? [{ inputTurnId: input.id, replyTurnId: reply.turn_id }]
+        : [];
+    }),
+  );
+}
+
 /** No historical side channel: summary and lookup query are derived from the same qualified turns. */
 export async function readConversationContext<T extends ConversationTurn>(
   db: Pick<Db, "select">,
