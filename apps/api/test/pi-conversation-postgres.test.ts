@@ -32,6 +32,7 @@ import {
   decodePiReview,
 } from "../src/personal-understanding/pi-conversation.js";
 import type { PiSessionArchive } from "../src/personal-understanding/pi-runtime.js";
+import { reviewSegments } from "../src/personal-understanding/review-edits.js";
 import { accountCoreModelRoutes } from "../src/routes/account-core-model.js";
 
 const final = (reply: string) =>
@@ -72,19 +73,19 @@ function responses(
     const payload = reviewPayload(context);
     if (payload) {
       const reply = review ? review(payload.candidate_reply) : payload.candidate_reply;
+      const segments = reviewSegments(payload.candidate_reply);
       return fauxAssistantMessage(
         JSON.stringify({
-          reply,
-          decisions:
+          edits:
             reply === payload.candidate_reply
               ? []
-              : [
-                  {
-                    statement: payload.candidate_reply,
-                    action: "narrow",
-                    reason: "仅保留本人原话支持的范围。",
-                  },
-                ],
+              : segments.map((segment, index) => ({
+                  target_id: segment.id,
+                  operation: index === 0 ? "replace" : "delete",
+                  ...(index === 0 ? { replacement: reply } : {}),
+                  reason: "仅保留本人原话支持的范围。",
+                  basis: { kind: "evidence" },
+                })),
         }),
       );
     }
@@ -697,15 +698,19 @@ it("delivers the evidence-reviewed wording and resumes without the unsupported p
     const accepted = await first.json();
     expect(accepted.reply).toContain("只是报名");
     expect(accepted.reply).not.toContain("已经付费");
-    expect(accepted).not.toHaveProperty("decisions");
+    expect(accepted).not.toHaveProperty("edits");
+    expect(accepted).not.toHaveProperty("review_application");
     const traces = await withProfileTransaction(f.db, f.ctx, (tx) =>
       tx.select().from(c.piRequestRecords).where(eq(c.piRequestRecords.conversationId, thread.id)),
     );
     const audit = traces
       .map((trace) => JSON.stringify(trace.output))
-      .find((text) => text.includes("decisions"));
+      .find((text) => text.includes("review_application"));
     expect(audit).toContain("仅保留本人原话支持的范围");
-    expect(audit).toContain("narrow");
+    expect(audit).toContain("replace");
+    expect(audit).toContain("applied_edits");
+    expect(audit).toContain("你已经付费，说明你已投入实际成本。");
+    expect(audit).toContain(accepted.reply);
     const next = await nextMessage(f, thread.id, accepted.version, "那接着聊吧。");
     let restoredContext = "";
     responses(f, [
@@ -720,7 +725,8 @@ it("delivers the evidence-reviewed wording and resumes without the unsupported p
     expect(restoredContext).toContain("只是报名");
     expect(restoredContext).not.toContain("你已经付费");
     expect(restoredContext).not.toContain("说明你已投入实际成本");
-    expect(restoredContext).not.toContain("decisions");
+    expect(restoredContext).not.toContain("review_application");
+    expect(restoredContext).not.toContain("applied_edits");
     expect(restoredContext).not.toContain("仅保留本人原话支持的范围");
   } finally {
     await f.close();
@@ -837,43 +843,94 @@ it("unwraps stored pi reply envelopes on rebuild without rewriting the stored tu
   }
 });
 
-it("requires review changes to have bounded dispositions tied to the draft", () => {
-  expect(decodePiReview(JSON.stringify({ reply: "原回应", decisions: [] }), "原回应").reply).toBe(
-    "原回应",
+it("applies only identified edits and records the actual before/after without normalizing untouched text", () => {
+  const candidate = "## 标题\r\n\r\n原观察。 另一句仍保留。\n- 原选项\n";
+  const target = reviewSegments(candidate).find((segment) => segment.text === "原观察。");
+  expect(target).toBeTruthy();
+  expect(decodePiReview('{"edits":[]}', candidate).reply).toBe(candidate);
+  const result = decodePiReview(
+    JSON.stringify({
+      edits: [
+        {
+          target_id: target?.id,
+          operation: "replace",
+          replacement: "有限观察。",
+          reason: "原话只支持此范围。",
+          basis: { kind: "evidence" },
+        },
+      ],
+    }),
+    candidate,
   );
+  expect(result.reply).toBe(candidate.replace("原观察。", "有限观察。"));
+  expect(result.audit.applied_edits[0]).toMatchObject({
+    before: "原观察。",
+    after: "有限观察。",
+    operation: "replace",
+  });
+  expect(result.audit.candidate_sha256).not.toBe(result.audit.result_sha256);
+  const deletion = decodePiReview(
+    JSON.stringify({
+      edits: [
+        {
+          target_id: target?.id,
+          operation: "delete",
+          reason: "无据判断。",
+          basis: { kind: "evidence" },
+        },
+      ],
+    }),
+    candidate,
+  );
+  expect(deletion.reply).toBe(candidate.replace("原观察。", ""));
+  expect(deletion.audit.applied_edits[0]?.operation).toBe("delete");
+});
+
+it("rejects conflicting, ineffective, ungrounded constraint and whole-reply review edits", () => {
+  const edit = {
+    target_id: "b1",
+    operation: "replace",
+    replacement: "修正。",
+    reason: "范围过宽。",
+    basis: { kind: "evidence" },
+  };
+  for (const value of [
+    { reply: "偷偷重写", edits: [] },
+    { edits: [{ ...edit, target_id: "b99" }] },
+    { edits: [edit, edit] },
+    { edits: [{ ...edit, replacement: "原观察。" }] },
+    { edits: [{ ...edit, replacement: "  " }] },
+    {
+      edits: [
+        { target_id: "b1", operation: "delete", reason: "全删", basis: { kind: "evidence" } },
+      ],
+    },
+    { edits: [{ ...edit, operation: "delete" }] },
+    {
+      edits: [
+        { ...edit, basis: { kind: "user_constraint", quote: "不要再提问", scope: "current_turn" } },
+      ],
+    },
+  ])
+    expect(() =>
+      decodePiReview(JSON.stringify(value), "原观察。", { current: "先问一道两选题", history: [] }),
+    ).toThrow("PI_REPLY_FORMAT_INVALID");
+  const constraint = {
+    ...edit,
+    basis: { kind: "user_constraint", quote: "先问一道两选题", scope: "current_turn" },
+  };
   expect(
-    decodePiReview(
-      JSON.stringify({
-        reply: "候选解释",
-        decisions: [{ statement: "原回应", action: "narrow", reason: "仅有候选支持。" }],
-      }),
-      "**原回应**",
-    ).decisions,
-  ).toHaveLength(1);
-  expect(() => decodePiReview("修订后回应", "原回应")).toThrow("PI_REPLY_FORMAT_INVALID");
-  expect(() => decodePiReview(JSON.stringify({ reply: "修订", decisions: [] }), "原回应")).toThrow(
-    "PI_REPLY_FORMAT_INVALID",
-  );
+    decodePiReview(JSON.stringify({ edits: [constraint] }), "原观察。", {
+      current: "先问一道两选题",
+      history: [],
+    }).audit.applied_edits[0]?.basis.kind,
+  ).toBe("user_constraint");
   expect(() =>
-    decodePiReview(
-      JSON.stringify({
-        reply: "修订",
-        decisions: [{ statement: "不存在的原句", action: "remove", reason: "无据" }],
-      }),
-      "原回应",
-    ),
+    decodePiReview(JSON.stringify({ edits: [constraint] }), "原观察。", {
+      current: "B",
+      history: ["先问一道两选题"],
+    }),
   ).toThrow("PI_REPLY_FORMAT_INVALID");
-  expect(
-    decodePiReview(
-      JSON.stringify({
-        reply: "有限候选",
-        decisions: [
-          { statement: "原回应", action: "narrow", reason: "能作候选，不能判为更可能。" },
-        ],
-      }),
-      "原回应",
-    ).decisions[0]?.action,
-  ).toBe("narrow");
 });
 
 it("does not publish an unauditable review and leaves the saved input pending", async () => {

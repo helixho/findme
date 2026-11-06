@@ -46,7 +46,7 @@ it("collects exact source dependencies and rejects excluded or cross-profile rea
       ) => Promise<{ content: Array<{ text: string }> }>;
       const declaredArgs =
         name === "read_source" || name === "read_conversation"
-          ? { ...(args as object), intended_use: "fact_context", relation: "核对原问题的表达归属" }
+          ? { intended_use: "fact_context", relation: "核对原问题的表达归属", ...(args as object) }
           : args;
       const result = await execute("synthetic-call", declaredArgs);
       return JSON.parse(result.content[0].text);
@@ -69,6 +69,32 @@ it("collects exact source dependencies and rejects excluded or cross-profile rea
       (await call("read_source", { id: source.id, include_analysis: true })).content,
     ).toContain("合成关键词");
     expect((await call("read_source", { id: source.id })).author).toBe("assistant");
+    const inspection = await call("read_source", {
+      id: source.id,
+      intended_use: "inspection",
+      relation: "尚不确定是否相关，先核对这段记录谈的是什么",
+      include_analysis: true,
+    });
+    expect(inspection.content).toContain("合成关键词");
+    expect(inspection.use_declaration).toEqual({
+      intended_use: "inspection",
+      relation: "尚不确定是否相关，先核对这段记录谈的是什么",
+      status: "candidate_not_adopted",
+    });
+    expect(inspection.relevance_status).toBe("undetermined");
+    expect(inspection.adoption_instruction).toContain("尚未采用的候选");
+    for (const name of ["read_source", "read_conversation"]) {
+      const tool = toolset.tools.find((item) => item.name === name)!;
+      const schema = tool.parameters as unknown as {
+        properties: { intended_use: { enum: string[] } };
+      };
+      expect(schema.properties.intended_use.enum).toEqual([
+        "inspection",
+        "fact_context",
+        "analogy",
+        "counterexample",
+      ]);
+    }
     expect(toolset.dependencies()).toHaveLength(1);
     expect(toolset.dependencies()[0]!.sourceId).toBe(source.id);
     const foreign = createPiReadTools(db.db, other).tools.find((t) => t.name === "read_source")!;

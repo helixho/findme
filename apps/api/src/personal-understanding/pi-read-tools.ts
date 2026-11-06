@@ -257,30 +257,40 @@ export function createPiReadTools(
       };
     });
   const UseDeclaration = z.object({
-    intended_use: z.enum(["fact_context", "analogy", "counterexample"]),
+    intended_use: z.enum(["inspection", "fact_context", "analogy", "counterexample"]),
     relation: z.string().trim().min(1).max(600),
   });
   const useProperties = {
     intended_use: {
       type: "string",
-      enum: ["fact_context", "analogy", "counterexample"],
-      description: "本次展开预期用途：事实背景、类比或反例",
+      enum: ["inspection", "fact_context", "analogy", "counterexample"],
+      description:
+        "本次展开预期用途：先核对是否相关、事实背景、类比或反例；尚不确定关系时使用inspection",
     },
     relation: {
       type: "string",
-      description: "说明这段材料与当前问题的具体关系；此声明仍须复核，不证明相关性",
+      description:
+        "说明要核对什么；inspection允许关系尚不确定，其余用途说明预期关系。此声明仍须复核，不证明相关性",
     },
   };
   const declared = <T>(value: T, input: z.infer<typeof UseDeclaration>) => ({
     ...value,
-    use_declaration: { ...input, status: "proposed_not_verified" },
+    use_declaration: {
+      ...input,
+      status:
+        input.intended_use === "inspection" ? "candidate_not_adopted" : "proposed_not_verified",
+    },
+    relevance_status:
+      input.intended_use === "inspection" ? "undetermined" : "proposed_not_verified",
     adoption_instruction:
-      "原文被读取不等于已支持当前结论。只按声明用途核对；类比不是本人事实或共同机制的证明。一般建议可独立给出，不以无关经历包装为个性化依据。",
+      input.intended_use === "inspection"
+        ? "本次只为核对是否相关，原文是尚未采用的候选。读到不等于相关或支持结论；核对后不相关可停止，若需引用应说明实际关系并核对语义支持，不能以inspection声明当作采用依据。"
+        : "原文被读取不等于已支持当前结论。只按声明用途核对；类比不是本人事实或共同机制的证明。一般建议可独立给出，不以无关经历包装为个性化依据。",
   });
   const tools = [
     make(
       "search_history",
-      "按关键词查找当前资料内的历史定位线索；零命中就是零命中，不自动混入近期原文。需要找回旧会话时可另用discover_conversations，再判断是否值得展开。",
+      "按关键词查找当前资料内的短定位摘录；短消息可能完整呈现。零命中就是零命中，不自动混入近期原文。需要找回旧会话时可另用discover_conversations，再判断是否值得展开。",
       { query: { type: "string" } },
       ["query"],
       async (input) => {
@@ -290,7 +300,7 @@ export function createPiReadTools(
     ),
     make(
       "discover_conversations",
-      "按需找回其他会话的有界线索：只返回来自合格本人原文的短标题、时间和编号，不返回正文，不声称相关。用于用户提及旧讨论但关键词无法定位时；可以找不到相关会话。",
+      "按需找回其他会话的有界线索：返回来自合格本人原文的短定位摘录、时间和编号，短消息可能完整呈现；不声称相关。用于用户提及旧讨论但关键词无法定位时；可以找不到相关会话。",
       {},
       [],
       async () => discover(),
