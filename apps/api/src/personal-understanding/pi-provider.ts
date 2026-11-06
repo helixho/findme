@@ -83,6 +83,7 @@ export async function createFindMePiProvider(options: {
   apiKey: string;
   model: string;
   limits: PiProviderLimits;
+  reasoningEffort?: () => "low" | undefined;
   recordPayload: (record: PiProviderPayloadRecord) => unknown | Promise<unknown>;
 }) {
   const baseUrl = validatePiOpenRouterEndpoint(options.baseUrl);
@@ -139,6 +140,8 @@ export async function createFindMePiProvider(options: {
                 },
               },
             };
+            const reasoningEffort = options.reasoningEffort?.();
+            if (reasoningEffort) payload.reasoning = { effort: reasoningEffort };
             payload.max_completion_tokens = undefined;
             const reservation = budget.reserve(payload);
             await options.recordPayload({

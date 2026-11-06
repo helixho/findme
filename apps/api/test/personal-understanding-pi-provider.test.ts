@@ -114,11 +114,13 @@ it("sends a bounded tool-capable OpenRouter payload through the real adapter usi
     );
   });
   const records: unknown[] = [];
+  let reviewing = false;
   const provider = await createFindMePiProvider({
     baseUrl: "https://openrouter.ai/api/v1",
     apiKey: "synthetic-secret",
     model: "synthetic/model",
     limits,
+    reasoningEffort: () => (reviewing ? "low" : undefined),
     recordPayload: async (record) => {
       records.push(record);
     },
@@ -152,6 +154,18 @@ it("sends a bounded tool-capable OpenRouter payload through the real adapter usi
   expect(result.content.some((part) => part.type === "toolCall")).toBe(true);
   expect(JSON.stringify(records)).not.toContain("synthetic-secret");
   expect(provider.usage().requests).toBe(1);
+  expect(sent).not.toHaveProperty("reasoning");
+  reviewing = true;
+  await provider.modelRuntime.completeSimple(
+    provider.model,
+    { messages: [{ role: "user", content: "复核草稿", timestamp: Date.now() }] },
+    { fetch },
+  );
+  provider.assertHealthy();
+  expect(sent?.reasoning).toEqual({ effort: "low" });
+  expect(fetch).toHaveBeenCalledTimes(2);
+  expect(provider.usage().requests).toBe(2);
+  expect(records).toHaveLength(2);
 });
 
 it("does not archive provider reasoning in assistant messages", async () => {

@@ -281,8 +281,10 @@ export function createPiReplyHandler(options: PiConversationOptions): PiReplyHan
           throw new Error("PI_RECORD_FAILED");
         }
       };
+      let reviewing = false;
       const provider = await (options.createProvider ?? createFindMePiProvider)({
         ...options.provider,
+        reasoningEffort: () => (reviewing ? "low" : undefined),
         recordPayload: checkpoint,
       });
       const [system, catalog, preparedMethods] = await Promise.all([
@@ -358,6 +360,7 @@ export function createPiReplyHandler(options: PiConversationOptions): PiReplyHan
         dialogue_and_tool_evidence: structuredClone(lastDraftMessages),
         candidate_reply: draft.reply,
       };
+      reviewing = true;
       reviewer = await createFindMePiSession({
         sessionId: `${input.exploration_id}-review-${operationId}`,
         cwd: process.cwd(),
