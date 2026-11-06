@@ -46,7 +46,8 @@ test("real response/source save, idempotent replay, version conflict and refresh
 }) => {
   await login(page);
   const question = `浏览器专题-${crypto.randomUUID()}`;
-  await page.getByText("从新的经历或问题开始", { exact: true }).click();
+  await page.getByRole("button", { name: "专题阅读", exact: true }).click();
+  await page.locator("summary").filter({ hasText: "创建专题报告" }).click();
   await page.getByLabel("问题", { exact: true }).fill(question);
   await page.getByRole("button", { name: "创建专题，不调用模型" }).click();
   await expect(page.getByRole("heading", { name: "当前没有可读的已审核报告" })).toBeVisible();
@@ -85,6 +86,7 @@ test("real response/source save, idempotent replay, version conflict and refresh
   );
   expect(stale.status).toBe(409);
   await page.reload();
+  await page.getByRole("button", { name: "专题阅读", exact: true }).click();
   await page.getByRole("button", { name: new RegExp(question) }).click();
   await page.getByRole("button", { name: "修订记录", exact: true }).click();
   await expect(page.getByText(note, { exact: true })).toBeVisible();
