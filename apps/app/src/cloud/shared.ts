@@ -95,6 +95,7 @@ const modelErrors: Record<string, string> = {
   LLM_JSON_PARSE: "模型未返回可用结果，可以稍后重新处理。",
   PI_REQUEST_LIMIT_REACHED: "本轮请求次数已用完，输入已保存，可以稍后继续。",
   PI_COST_LIMIT_REACHED: "本轮费用上限已到，输入已保存。",
+  PI_OUTPUT_LIMIT_REACHED: "本轮回答没有生成完整，原话已保存。",
   PI_INPUT_LIMIT_REACHED: "本轮材料超过处理上限，原文已保存。",
   PI_USER_ABORTED: "本轮已停止，输入已保存，可以继续聊。",
   PI_MODEL_ERROR: "模型暂未完成回应，输入已保存。",

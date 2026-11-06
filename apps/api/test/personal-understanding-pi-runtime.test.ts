@@ -299,3 +299,13 @@ describe("FindMe pi sessions", () => {
     second.dispose();
   });
 });
+
+it("does not deliver a token-truncated response as a complete reply", async () => {
+  const f = await fixture();
+  f.provider.setResponses([fauxAssistantMessage("unfinished", { stopReason: "length" })]);
+  const session = await createFindMePiSession(f.options);
+  await expect(session.prompt("synthetic")).rejects.toThrow("PI_OUTPUT_LIMIT_REACHED");
+  expect(f.provider.state.callCount).toBe(1);
+  expect(f.records.some((r) => r.output !== undefined)).toBe(true);
+  session.dispose();
+});

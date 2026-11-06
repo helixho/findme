@@ -122,7 +122,7 @@ export async function createFindMePiProvider(options: {
         apiKey: options.apiKey,
         maxRetries: 0,
         maxTokens: limits.maxOutputTokens,
-        timeoutMs: 60000,
+        timeoutMs: 110000,
         onPayload: async (raw) => {
           if (failure) throw failure;
           try {

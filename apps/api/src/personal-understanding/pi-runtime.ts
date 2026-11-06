@@ -252,6 +252,7 @@ export async function createFindMePiSession(options: FindMePiOptions) {
         if (traceError) throw traceError;
         if (aborted || last?.stopReason === "aborted") throw new Error("PI_USER_ABORTED");
         if (last?.stopReason === "error") throw new Error("PI_MODEL_ERROR");
+        if (last?.stopReason === "length") throw new Error("PI_OUTPUT_LIMIT_REACHED");
         return session.getLastAssistantText() ?? "";
       }),
     /** Keep the original draft in the source archive, replace its future context contribution. */
