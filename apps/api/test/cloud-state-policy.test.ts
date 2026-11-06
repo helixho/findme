@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   type CloudJobStatus,
   claimQueuedJob,
+  defaultResumeCap,
   invalidatesQueuedJob,
   jobReservationBlocked,
   processingFailureStatus,
@@ -161,5 +162,16 @@ describe("cloud job decisions (pure characterization, no database/model guarante
   ])("%s: queued invalidation %s, execution failure %s", (code, queued, failure) => {
     expect(invalidatesQueuedJob(code)).toBe(queued);
     expect(processingFailureStatus(code)).toBe(failure);
+  });
+
+  it("continues an interrupted job within its cap, and an exhausted one at the server limit", () => {
+    const interrupted = { ...base, error: "INTERRUPTED", callsUsed: 1, callCap: 4 };
+    expect(defaultResumeCap(interrupted, 4)).toBe(4);
+    expect(
+      recoveryDecision(interrupted, defaultResumeCap(interrupted, 4), 4, now).error,
+    ).toBeNull();
+    const exhausted = { ...base, error: "JOB_CALL_CAP_EXHAUSTED", callsUsed: 4, callCap: 4 };
+    expect(defaultResumeCap(exhausted, 8)).toBe(8);
+    expect(recoveryDecision(exhausted, defaultResumeCap(exhausted, 8), 8, now).error).toBeNull();
   });
 });

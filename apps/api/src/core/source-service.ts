@@ -51,6 +51,13 @@ export async function updateSourceAssessment(
 
   return db.transaction(async (tx) => {
     await lockCoreSourceExplorations(tx, ctx, [source.id]);
+    // Same order as model commits (conversations, sources, revisions): holding the
+    // source row makes a commit that verified this source wait or see the change.
+    await tx
+      .select({ id: coreSchema.sourceItems.id })
+      .from(coreSchema.sourceItems)
+      .where(eq(coreSchema.sourceItems.id, source.id))
+      .for("update");
     const [retired] = await tx
       .update(coreSchema.sourceAssessments)
       .set({ isCurrent: false })

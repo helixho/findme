@@ -35,6 +35,14 @@ export function recoveryDecision(job: RecoveryJob, cap: number, serverCap: numbe
   return { error: null, checkProfileBudget: exhausted } as const;
 }
 
+/** Resume budget when the owner just asks to continue: keep the job's cap while
+ * it has calls left, otherwise use the server's per-job limit. */
+export function defaultResumeCap(job: RecoveryJob, serverCap: number) {
+  const exhausted =
+    job.error === "JOB_CALL_CAP_EXHAUSTED" || job.error === "PROFILE_CALL_CAP_EXHAUSTED";
+  return exhausted || job.callsUsed >= job.callCap ? serverCap : job.callCap;
+}
+
 export function profileCapExhausted(callsUsed: number, limit: number) {
   return callsUsed >= limit;
 }

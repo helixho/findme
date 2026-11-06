@@ -823,12 +823,8 @@ export function RunDetail({
                       disabled={busy}
                       onClick={() =>
                         void action(async () => {
-                          // Another round within the service limits; the server
-                          // enforces the profile budget and never resets usage.
-                          const cap = Math.min(20, j.calls_used + Math.max(1, j.call_cap));
-                          await cloudMutation(`/api/diagnostics/jobs/${j.id}/resume`, {
-                            provider_call_cap: cap,
-                          });
+                          // The service decides the budget for the next round.
+                          await cloudMutation(`/api/diagnostics/jobs/${j.id}/resume`, {});
                           await reload();
                         })
                       }

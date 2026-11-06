@@ -211,7 +211,9 @@ export function ConversationView({ resumeId }: { resumeId?: string | null } = {}
         },
       });
     const talking = (view.turns ?? []).some((turn) => turn.turnKind === "reply");
-    if (view.phase === "ready_to_plan" && !talking)
+    // A message still waiting for its reply is retried as a reply, never as exploration.
+    const waiting = !!view.pending?.messages?.length;
+    if (view.phase === "ready_to_plan" && !talking && !waiting)
       return allowProceed
         ? proceed(view.id, view.version)
         : setStep({
@@ -395,13 +397,22 @@ export function ConversationView({ resumeId }: { resumeId?: string | null } = {}
                   type="button"
                   disabled={busy}
                   onClick={() =>
-                    void run(async () => {
-                      const next = await cloudRequest<ExplorationListResponse>(
-                        `/api/core/explorations?status=completed&limit=${FINISHED_PAGE}&offset=${recent.length}`,
-                      );
-                      setRecent((all) => [...all, ...next.items]);
-                      setRecentMore(next.items.length === FINISHED_PAGE);
-                    })
+                    // Not through run(): its refresh reloads page one and would drop this page.
+                    void (async () => {
+                      setBusy(true);
+                      setError("");
+                      try {
+                        const next = await cloudRequest<ExplorationListResponse>(
+                          `/api/core/explorations?status=completed&limit=${FINISHED_PAGE}&offset=${recent.length}`,
+                        );
+                        setRecent((all) => [...all, ...next.items]);
+                        setRecentMore(next.items.length === FINISHED_PAGE);
+                      } catch (e) {
+                        setError(explain(e));
+                      } finally {
+                        setBusy(false);
+                      }
+                    })()
                   }
                 >
                   显示更多

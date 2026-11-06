@@ -17,6 +17,7 @@ import {
 } from "./llm.js";
 import { completeCoreOperation, lockCoreOperation } from "./operations.js";
 import {
+  assertEvidenceUsable,
   loadPriorUnderstanding,
   priorContextText,
   priorSelectionMeta,
@@ -625,6 +626,8 @@ export async function replyToMessageWith(
         parsed.expected_version,
         { reopen: true },
       );
+      // The message itself must still be usable (not excluded or deleted meanwhile).
+      await assertEvidenceUsable(tx, ctx, [{ sourceItemId: message.id, assessmentVersion: null }]);
       // Every revision offered to the model must still be current with valid
       // evidence, and stay so until this commit: lock them (conversation row
       // first, then revisions in id order, as in all other commits). A

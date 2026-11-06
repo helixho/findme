@@ -28,6 +28,7 @@ import { qualificationAssigned } from "../understanding-app/qualification.js";
 import { CLOUD_PIPELINE_ID } from "./policy-identity.js";
 import {
   claimQueuedJob,
+  defaultResumeCap,
   invalidatesQueuedJob,
   jobReservationBlocked,
   processingFailureStatus,
@@ -537,19 +538,17 @@ export class CloudProcessingService {
   async resume(ctx: PersonalContext, id: string, raw: unknown) {
     this.ensureEnabled();
     const request = z
-      .object({ provider_call_cap: z.number().int().min(0).max(20) })
+      // Omitted: the service decides (keep the job's cap while it has calls left,
+      // otherwise the server's per-job limit).
+      .object({ provider_call_cap: z.number().int().min(0).max(20).optional() })
       .strict()
       .parse(raw);
     const job = await withProfileTransaction(this.db, ctx, async (tx) => {
       const row = required(
         (await tx.select().from(p.cloudJobs).where(ownedJob(ctx, id)).limit(1).for("update"))[0],
       );
-      const recovery = recoveryDecision(
-        row,
-        request.provider_call_cap,
-        this.options.maxCallsPerJob,
-        new Date(),
-      );
+      const cap = request.provider_call_cap ?? defaultResumeCap(row, this.options.maxCallsPerJob);
+      const recovery = recoveryDecision(row, cap, this.options.maxCallsPerJob, new Date());
       if (recovery.error) throw new Error(recovery.error);
       if (recovery.checkProfileBudget) {
         const [budget] = await tx
@@ -577,7 +576,7 @@ export class CloudProcessingService {
           error: null,
           execution: null,
           leaseUntil: null,
-          callCap: request.provider_call_cap,
+          callCap: cap,
           updatedAt: new Date(),
         })
         .where(ownedJob(ctx, id))

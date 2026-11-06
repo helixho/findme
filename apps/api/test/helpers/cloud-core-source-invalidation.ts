@@ -197,7 +197,8 @@ export function cloudCoreSourceInvalidation(env: Environment) {
         true,
       );
       expect(after.explorations.find((r) => r.id === f.exploration)?.version).toBe(4);
-      expect(after.explorations.find((r) => r.id === f.completed)?.version).toBe(5);
+      // Finished conversations are bumped too, so work resumed on them sees the change.
+      expect(after.explorations.find((r) => r.id === f.completed)?.version).toBe(6);
       expect(await f.lifecycle.act(f.ctx, f.source, first.body, first.key)).toEqual(first.result);
       expect(await f.state()).toEqual(after);
     });

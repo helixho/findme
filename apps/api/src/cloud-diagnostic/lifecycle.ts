@@ -85,6 +85,21 @@ export class CloudLifecycleService {
         if (prior.requestHash !== hash) throw new Error("IDEMPOTENCY_KEY_REUSED");
         return prior.result;
       }
+      // Hard deletion later clears every Core operation of this Profile. Model
+      // commits lock their operation row first, so take operation rows before
+      // conversations and sources to keep one lock order.
+      if (input.action === "delete")
+        await tx
+          .select({ id: c.coreOperations.id })
+          .from(c.coreOperations)
+          .where(
+            and(
+              eq(c.coreOperations.tenantId, ctx.tenantId),
+              eq(c.coreOperations.subjectId, ctx.subjectId),
+            ),
+          )
+          .orderBy(c.coreOperations.id)
+          .for("update");
       await lockCoreSourceExplorations(tx, ctx, [id]);
       const [source] = await tx
         .select()

@@ -846,3 +846,69 @@ test("a reply stays visible when its new facts lead to a follow-up question", as
   await expect(page.getByText("这次进展改变了什么？")).toBeVisible();
   await expect(page.getByText("合成回应：接住进展。")).toBeVisible();
 });
+
+test("a first message whose reply failed is retried as a reply, not as exploration", async ({
+  page,
+}) => {
+  const calls: string[] = [];
+  const summary = {
+    id: "e6",
+    status: "active",
+    version: 1,
+    phase: "ready_to_plan",
+    started_at: "2026-11-05T00:00:00Z",
+    last_activity_at: "2026-11-05T00:00:00Z",
+    completed_at: null,
+    experience_id: "x",
+    summary: "合成新话题",
+    open_question: null,
+    parked: false,
+    key_uncertainty: null,
+  };
+  await setup(page, async (route, path) => {
+    const method = route.request().method();
+    const url = new URL(route.request().url());
+    if (path === "/api/core/model-status")
+      return json(route, {
+        enabled: true,
+        window_hours: 24,
+        operation_limit: 30,
+        operations_used: 0,
+      }).then(() => true);
+    if (path === "/api/core/understanding")
+      return json(route, { state: "empty", claims: [], needs_review: [] }).then(() => true);
+    if (path === "/api/core/understanding/changes")
+      return json(route, { items: [] }).then(() => true);
+    if (path === "/api/core/explorations" && method === "GET")
+      return json(route, {
+        items: url.searchParams.get("status") === "active" ? [summary] : [],
+      }).then(() => true);
+    if (path === "/api/core/explorations/e6" && method === "GET")
+      return json(route, {
+        id: "e6",
+        version: 1,
+        status: "active",
+        phase: "ready_to_plan",
+        open_question: null,
+        latest_step: null,
+        experience: { id: "x", summary: "合成新话题", occurred_at: null, context: {} },
+        turns: [{ id: "t1", role: "user", turnKind: "event", content: "帮我比较两个选择。" }],
+        pending: {
+          corrections: [],
+          messages: [{ source_id: "m1", message: "帮我比较两个选择。", saved_at: "x" }],
+          updates: [],
+        },
+        understanding: { outcome: null, claims: [], gaps: [], needs_review: [] },
+      }).then(() => true);
+    if (path.startsWith("/api/core/explorations/e6/")) {
+      calls.push(path.split("/").pop() ?? "");
+      return json(route, { error: { code: "LLM_UNAVAILABLE" } }, 503).then(() => true);
+    }
+    return false;
+  });
+  await page.getByRole("button", { name: "对话" }).click();
+  await page.getByRole("button", { name: "继续", exact: true }).click();
+  await page.getByRole("button", { name: "重新处理" }).click();
+  await expect.poll(() => calls).toContain("reply");
+  expect(calls).not.toContain("continue");
+});

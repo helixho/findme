@@ -533,4 +533,27 @@ dbDescribe("Core conversation continuity (AG-07a)", () => {
     expect(second).toHaveLength(1);
     expect(first.map((i) => i.id)).not.toContain(second[0]?.id);
   });
+
+  it("does not publish a reply to a message excluded while a finished matter was resumed", async () => {
+    const { id, done } = await understood();
+    const saved = await ok(`/api/core/explorations/${id}/messages`, {
+      expected_version: done.version,
+      message: "这条稍后会被排除。",
+    });
+    const completed = await ok(`/api/core/explorations/${id}/complete`, {
+      expected_version: saved.version,
+    });
+    duringReply = async () => {
+      await db
+        .update(coreSchema.sourceItems)
+        .set({ usageStatus: "excluded" })
+        .where(eq(coreSchema.sourceItems.id, saved.message_source_id));
+    };
+    const stale = await post(app, `/api/core/explorations/${id}/reply`, {
+      expected_version: completed.version,
+      message_source_id: saved.message_source_id,
+    });
+    expect(stale.status).toBe(409);
+    expect((await view(id)).status).toBe("completed");
+  });
 });

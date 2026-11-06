@@ -104,15 +104,13 @@ export async function invalidateCoreSourceUnderstanding(
     for (const row of rows) {
       if (affectedExplorationIds.has(row.id)) continue;
       affectedExplorationIds.add(row.id);
-      if (row.status === "active") {
-        await tx
-          .update(coreSchema.explorations)
-          .set({
-            version: sql`${coreSchema.explorations.version} + 1`,
-            lastActivityAt: new Date(),
-          })
-          .where(eq(coreSchema.explorations.id, row.id));
-      }
+      await tx
+        .update(coreSchema.explorations)
+        .set({
+          version: sql`${coreSchema.explorations.version} + 1`,
+          lastActivityAt: new Date(),
+        })
+        .where(eq(coreSchema.explorations.id, row.id));
     }
   }
 

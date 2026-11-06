@@ -6,6 +6,11 @@ type Sql = ReturnType<typeof createDb>["sql"];
 
 export type Migration = { name: string; sql: string };
 
+const TRACKING = `create table if not exists public.schema_migrations (
+  name text primary key,
+  applied_at timestamp with time zone default now() not null
+)`;
+
 /** Ordered upgrade scripts: packages/db/migrations/NNNN-name.sql. */
 export async function readMigrations(dir: string): Promise<Migration[]> {
   const names = (await readdir(dir).catch(() => [] as string[]))
@@ -38,22 +43,29 @@ export function expectedColumns(schema: string) {
 export async function applyStructure(sql: Sql, schema: string, migrations: Migration[]) {
   const [structure] = await sql`select to_regclass('public.tenants') is not null as ready`;
   const fresh = !structure?.ready;
-  if (fresh) await sql.unsafe(schema);
-  await sql`create table if not exists public.schema_migrations (
-    name text primary key,
-    applied_at timestamp with time zone default now() not null
-  )`;
-  const done = new Set(
-    (await sql<{ name: string }[]>`select name from public.schema_migrations`).map((r) => r.name),
-  );
   const applied: string[] = [];
-  for (const migration of migrations) {
-    if (done.has(migration.name)) continue;
+  if (fresh) {
+    // schema.sql already contains every migration: create it and record them
+    // together, so an interruption cannot leave a new database marked as old.
     await sql.begin(async (tx) => {
-      if (!fresh) await tx.unsafe(migration.sql);
-      await tx`insert into public.schema_migrations (name) values (${migration.name})`;
+      await tx.unsafe(schema);
+      await tx.unsafe(TRACKING);
+      for (const migration of migrations)
+        await tx`insert into public.schema_migrations (name) values (${migration.name})`;
     });
-    if (!fresh) applied.push(migration.name);
+  } else {
+    await sql.unsafe(TRACKING);
+    const done = new Set(
+      (await sql<{ name: string }[]>`select name from public.schema_migrations`).map((r) => r.name),
+    );
+    for (const migration of migrations) {
+      if (done.has(migration.name)) continue;
+      await sql.begin(async (tx) => {
+        await tx.unsafe(migration.sql);
+        await tx`insert into public.schema_migrations (name) values (${migration.name})`;
+      });
+      applied.push(migration.name);
+    }
   }
   const actual = await sql<{ name: string }[]>`
     select table_name || '.' || column_name as name from information_schema.columns
