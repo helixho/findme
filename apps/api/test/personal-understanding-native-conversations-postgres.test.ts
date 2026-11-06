@@ -76,6 +76,60 @@ it("reads complete native messages, preserves short-answer context and withholds
     await expect(reader.read(other, { conversationId })).rejects.toThrow(
       "CONVERSATION_NOT_AVAILABLE",
     );
+    // A source read by B must remain a dependency when C reads B's reply.
+    const sourceA = await withProfileTransaction(runtime.db, ctx, async (tx) => {
+      const [a] = await tx
+        .insert(c.sourceItems)
+        .values({
+          ...ctx,
+          sourceKind: "native_event",
+          authorKind: "subject",
+          content: "A-private-original",
+        })
+        .returning();
+      if (!a) throw new Error("fixture");
+      await tx.insert(c.sourceAssessments).values({
+        sourceItemId: a.id,
+        version: 1,
+        attributionStatus: "confirmed_subject",
+        contextCompleteness: "partial",
+        temporalPrecision: "unknown",
+        eligibility: "eligible",
+        rationale: "synthetic",
+      });
+      const [reply] = await tx
+        .insert(c.explorationTurns)
+        .values({
+          explorationId: conversationId,
+          role: "assistant",
+          turnKind: "pi_reply",
+          content: "A-private-original inside B",
+          createdAt: new Date(3000),
+        })
+        .returning();
+      if (!reply) throw new Error("fixture");
+      await tx
+        .update(c.sourceItems)
+        .set({
+          sourceMeta: { reply: { engine: "pi", turn_id: reply.id, source_ids: [a.id, sourceId] } },
+        })
+        .where(eq(c.sourceItems.id, sourceId));
+      return a.id;
+    });
+    const beforeAExcluded = await reader.read(ctx, { conversationId });
+    expect(beforeAExcluded.dependencies.map((d) => d.sourceId)).toContain(sourceA);
+    expect(beforeAExcluded.turns.find((t) => t.kind === "pi_reply")?.content).toContain(
+      "A-private-original",
+    );
+    await withProfileTransaction(runtime.db, ctx, (tx) =>
+      tx
+        .update(c.sourceItems)
+        .set({ usageStatus: "excluded" })
+        .where(eq(c.sourceItems.id, sourceA)),
+    );
+    const afterAExcluded = await reader.read(ctx, { conversationId });
+    expect(afterAExcluded.turns.find((t) => t.kind === "pi_reply")?.content).toBeNull();
+    expect(JSON.stringify(afterAExcluded)).not.toContain("A-private-original");
     await withProfileTransaction(runtime.db, ctx, (tx) =>
       tx
         .update(c.sourceItems)

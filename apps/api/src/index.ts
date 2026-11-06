@@ -1,4 +1,6 @@
 import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { createDb } from "@findme/db";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
@@ -9,6 +11,7 @@ import { accountRuntimeRoleQuery } from "./cloud-diagnostic/runtime-role.js";
 import { createCloudServices } from "./cloud-diagnostic/runtime.js";
 import { parseEnv } from "./env.js";
 import { createGateway } from "./llm/gateway.js";
+import { PI_REPLY_LIMITS, createPiReplyHandler } from "./personal-understanding/pi-conversation.js";
 import { fileBlobStore } from "./standalone/files.js";
 import { readModelSettings } from "./standalone/settings.js";
 import { startLocalWorker } from "./standalone/worker.js";
@@ -63,6 +66,21 @@ async function build() {
     cloud,
     gateway,
     coreModel: options.coreModel,
+    piReply: settings.apiKey
+      ? createPiReplyHandler({
+          db,
+          provider: {
+            apiKey: settings.apiKey,
+            baseUrl: settings.baseUrl,
+            model: settings.model,
+            limits: PI_REPLY_LIMITS,
+          },
+          methodsRoot: path.resolve(
+            process.env.FINDME_METHODS_ROOT ??
+              fileURLToPath(new URL("../resources/personal-understanding", import.meta.url)),
+          ),
+        })
+      : undefined,
     auth: {
       mode: "account",
       sessions: ownerSessions(ownerId),

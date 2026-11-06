@@ -1,3 +1,4 @@
+import { type AssistantMessage, createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import {
   type AgentSessionEvent,
   type FileEntry,
@@ -33,10 +34,10 @@ export type FindMePiOptions = {
   archive?: PiSessionArchive;
   tools?: ToolDefinition[];
   maxRequests: number;
-  /** Must synchronously reserve host-wide cost/call budget before dispatch; denial throws. */
-  reserve: (record: PiRequestRecord) => void;
+  /** Must reserve host-wide cost/call budget before dispatch; denial throws. */
+  reserve: (record: PiRequestRecord) => void | Promise<void>;
   /** Private archive sink; no application logs. A sink failure stops further requests. */
-  record: (record: PiRequestRecord) => void;
+  record: (record: PiRequestRecord) => unknown | Promise<unknown>;
   onEvent?: (event: AgentSessionEvent) => void;
 };
 
@@ -76,7 +77,10 @@ export async function createFindMePiSession(options: FindMePiOptions) {
   }
   let requests = 0;
   let traceError: unknown;
-  const guard = (method: string, args: unknown[]) => {
+  let turnError: unknown;
+  let aborted = false;
+  const pending = new Set<Promise<void>>();
+  const guard = async (method: string, args: unknown[]) => {
     if (traceError) throw traceError;
     if (requests >= options.maxRequests) throw new Error("PI_REQUEST_LIMIT_REACHED");
     const model = args[0] as FindMePiOptions["model"];
@@ -96,8 +100,14 @@ export async function createFindMePiSession(options: FindMePiOptions) {
         context: args[1],
       }),
     };
-    options.reserve(request);
-    options.record(request);
+    await options.reserve(request);
+    if (aborted) throw new Error("PI_USER_ABORTED");
+    try {
+      await options.record(request);
+    } catch (error) {
+      traceError = error;
+      throw error;
+    }
     requests++;
     return request;
   };
@@ -107,27 +117,77 @@ export async function createFindMePiSession(options: FindMePiOptions) {
       const original = Reflect.get(target, property, target);
       if (["stream", "streamSimple", "complete", "completeSimple"].includes(String(property))) {
         return (...args: unknown[]) => {
-          const request = guard(String(property), args);
-          const controls = args[2] && typeof args[2] === "object" ? args[2] : {};
-          args[2] = { ...controls, maxRetries: 0 };
-          const result = original.apply(target, args);
-          const capture = (output: unknown) => {
+          const execute = async () => {
+            const request = await guard(String(property), args);
+            const controls = args[2] && typeof args[2] === "object" ? args[2] : {};
+            args[2] = { ...controls, maxRetries: 0 };
+            return { request, result: original.apply(target, args) };
+          };
+          const capture = async (request: PiRequestRecord, output: unknown) => {
             try {
-              options.record({ ...request, output: visible(output) });
+              await options.record({ ...request, output: visible(output) });
             } catch (error) {
               traceError = error;
+              throw error;
             }
-            return output;
           };
-          if (result instanceof Promise) return result.then(capture);
-          // result() observes the final value without consuming the event iterator.
-          void result
-            .result()
-            .then(capture)
-            .catch((error: unknown) => {
-              traceError = error;
-            });
-          return result;
+          if (String(property).startsWith("complete")) {
+            return (async () => {
+              try {
+                const { request, result } = await execute();
+                const output = await result;
+                await capture(request, output);
+                return output;
+              } catch (error) {
+                turnError = error;
+                throw error;
+              }
+            })();
+          }
+          const stream = createAssistantMessageEventStream();
+          const work = (async () => {
+            try {
+              const { request, result } = await execute();
+              for await (const event of result) {
+                // Await durable recording before pi sees a terminal event and
+                // can start another request or report this turn as successful.
+                if (event.type === "done" || event.type === "error")
+                  await capture(request, event.type === "done" ? event.message : event.error);
+                stream.push(event);
+              }
+              stream.end(await result.result());
+            } catch (error) {
+              turnError = error;
+              const model = args[0] as FindMePiOptions["model"];
+              const failure: AssistantMessage = {
+                role: "assistant",
+                api: model.api,
+                provider: model.provider,
+                model: model.id,
+                content: [],
+                stopReason: aborted ? "aborted" : "error",
+                errorMessage: "FindMe execution stopped",
+                timestamp: Date.now(),
+                usage: {
+                  input: 0,
+                  output: 0,
+                  cacheRead: 0,
+                  cacheWrite: 0,
+                  totalTokens: 0,
+                  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+                },
+              };
+              stream.push({
+                type: "error",
+                reason: failure.stopReason as "error" | "aborted",
+                error: failure,
+              });
+              stream.end(failure);
+            }
+          })();
+          pending.add(work);
+          void work.finally(() => pending.delete(work));
+          return stream;
         };
       }
       return typeof original === "function" ? original.bind(target) : original;
@@ -170,11 +230,16 @@ export async function createFindMePiSession(options: FindMePiOptions) {
   const run = async <T>(action: () => Promise<T>) => {
     if (busy) throw new Error("PI_SESSION_BUSY");
     busy = true;
+    turnError = undefined;
+    aborted = false;
     try {
       const result = await action();
+      await Promise.all([...pending]);
+      if (turnError) throw turnError;
       if (traceError) throw traceError;
       return result;
     } finally {
+      await Promise.all([...pending]);
       busy = false;
     }
   };
@@ -183,12 +248,17 @@ export async function createFindMePiSession(options: FindMePiOptions) {
       run(async () => {
         await session.prompt(text, { expandPromptTemplates: false });
         const last = session.messages.filter((message) => message.role === "assistant").at(-1);
-        if (last && (last.stopReason === "error" || last.stopReason === "aborted"))
-          throw new Error("PI_GENERATION_INCOMPLETE");
+        if (turnError) throw turnError;
+        if (traceError) throw traceError;
+        if (aborted || last?.stopReason === "aborted") throw new Error("PI_USER_ABORTED");
+        if (last?.stopReason === "error") throw new Error("PI_MODEL_ERROR");
         return session.getLastAssistantText() ?? "";
       }),
     compact: (instructions: string) => run(() => session.compact(instructions)),
-    abort: () => session.abort(),
+    abort: () => {
+      aborted = true;
+      return session.abort();
+    },
     snapshot: (): PiSessionArchive => {
       const header = manager.getHeader();
       if (!header) throw new Error("PI_SESSION_HEADER_MISSING");

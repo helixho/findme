@@ -72,7 +72,7 @@ describe("FindMe pi sessions", () => {
         throw new Error("budget denied");
       },
     });
-    await expect(session.prompt("synthetic")).rejects.toThrow();
+    await expect(session.prompt("synthetic")).rejects.toThrow("budget denied");
     expect(f.provider.state.callCount).toBe(0);
     expect(session.requestCount()).toBe(0);
     expect(
@@ -197,6 +197,83 @@ describe("FindMe pi sessions", () => {
     expect(JSON.stringify(f.records)).not.toContain("PRIVATE_THINKING");
     expect(JSON.stringify(events)).not.toContain("PRIVATE_THINKING");
     expect(JSON.stringify(session.snapshot())).not.toContain("PRIVATE_THINKING");
+    session.dispose();
+  });
+  it("waits for async reservation and durable output recording before succeeding", async () => {
+    const f = await fixture();
+    f.provider.setResponses([fauxAssistantMessage("saved")]);
+    let releaseGate!: () => void;
+    let releaseRecord!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseGate = resolve;
+    });
+    const output = new Promise<void>((resolve) => {
+      releaseRecord = resolve;
+    });
+    const session = await createFindMePiSession({
+      ...f.options,
+      reserve: () => gate,
+      record: (record) => (record.output === undefined ? undefined : output),
+    });
+    let finished = false;
+    const turn = session.prompt("synthetic").then((reply) => {
+      finished = true;
+      return reply;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(f.provider.state.callCount).toBe(0);
+    releaseGate();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(f.provider.state.callCount).toBe(1);
+    expect(finished).toBe(false);
+    releaseRecord();
+    expect(await turn).toBe("saved");
+    session.dispose();
+  });
+
+  it("fails this turn on async recording errors and prevents another provider call", async () => {
+    const f = await fixture();
+    f.provider.setResponses([fauxAssistantMessage("one"), fauxAssistantMessage("must not run")]);
+    const session = await createFindMePiSession({
+      ...f.options,
+      record: async (record) => {
+        if (record.output !== undefined) {
+          await Promise.resolve();
+          throw new Error("async sink failed");
+        }
+      },
+    });
+    await expect(session.prompt("one")).rejects.toThrow("async sink failed");
+    await expect(session.prompt("two")).rejects.toThrow("async sink failed");
+    expect(f.provider.state.callCount).toBe(1);
+    session.dispose();
+  });
+
+  it("can continue the same session after a user abort", async () => {
+    const f = await fixture();
+    let entered!: () => void;
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    f.provider.setResponses([
+      async (_context, options) => {
+        entered();
+        await new Promise<void>((resolve) => {
+          if (options?.signal?.aborted) resolve();
+          else options?.signal?.addEventListener("abort", () => resolve(), { once: true });
+        });
+        return fauxAssistantMessage("", { stopReason: "aborted" });
+      },
+      fauxAssistantMessage("continued"),
+    ]);
+    const session = await createFindMePiSession(f.options);
+    const turn = session.prompt("first");
+    const failure = expect(turn).rejects.toThrow("PI_USER_ABORTED");
+    await started;
+    await session.abort();
+    await failure;
+    expect(await session.prompt("continue")).toBe("continued");
+    expect(session.requestCount()).toBe(2);
     session.dispose();
   });
 });

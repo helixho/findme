@@ -56,3 +56,11 @@ export async function withProfileTransaction<T>(
     return work(tx);
   });
 }
+
+/** Serialize short source/context mutations within one Profile, never across a model call.
+ * Cross-conversation quotation invalidation otherwise reverses source and conversation locks. */
+export async function lockPiProfileState(tx: ProfileTransaction, ctx: PersonalContext) {
+  await tx.execute(
+    sql`select pg_advisory_xact_lock(hashtextextended(${`pi-profile:${ctx.tenantId}:${ctx.subjectId}`}, 0))`,
+  );
+}

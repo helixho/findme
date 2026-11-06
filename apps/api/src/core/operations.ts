@@ -197,3 +197,16 @@ export async function lockCoreOperation(db: Pick<Db, "select">, operationId: str
     .where(eq(coreSchema.coreOperations.id, operationId))
     .for("update");
 }
+
+/** Extend only an existing active reservation; never creates or retries a paid operation. */
+export async function refreshCoreOperationLease(db: Pick<Db, "update">, operationId: string) {
+  await db
+    .update(coreSchema.coreOperations)
+    .set({ leaseExpiresAt: new Date(Date.now() + LEASE_MS) })
+    .where(
+      and(
+        eq(coreSchema.coreOperations.id, operationId),
+        eq(coreSchema.coreOperations.status, "processing"),
+      ),
+    );
+}

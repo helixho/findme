@@ -22,6 +22,7 @@ WORKDIR /app
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=8000
 COPY --from=build /runtime/ ./
 COPY --from=build /src/apps/app/dist ./public
+COPY --from=build /src/apps/api/resources ./resources
 COPY packages/db/schema.sql ./packages/db/schema.sql
 COPY packages/db/access ./packages/db/access
 COPY packages/db/migrations ./packages/db/migrations

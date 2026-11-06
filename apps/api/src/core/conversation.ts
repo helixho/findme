@@ -2,6 +2,10 @@ import { CorrectionInput } from "@findme/core";
 import { type Db, coreSchema } from "@findme/db";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
+import {
+  assertConversationSourcesCurrent,
+  readConversationContext,
+} from "./conversation-context.js";
 import { PURPOSEFUL_EXPLORATION_POLICY, inputFingerprint } from "./epistemic-policy.js";
 import { CoreError } from "./errors.js";
 import { jsonObject, modelClaimKey } from "./exploration-context.js";
@@ -17,7 +21,6 @@ import {
 } from "./llm.js";
 import { completeCoreOperation, lockCoreOperation } from "./operations.js";
 import {
-  assertEvidenceUsable,
   loadPriorUnderstanding,
   priorContextText,
   priorSelectionMeta,
@@ -490,11 +493,6 @@ export async function replyToMessageWith(
       throw new CoreError("MESSAGE_NOT_FOUND", 404, "这条消息不存在");
     if (meta.reply_status !== "pending")
       throw new CoreError("MESSAGE_ALREADY_ANSWERED", 409, "这条消息已经回应过");
-    const [experience] = await db
-      .select()
-      .from(coreSchema.experiences)
-      .where(eq(coreSchema.experiences.id, exploration.experienceId))
-      .limit(1);
     const [turns, questions, claims] = await Promise.all([
       db
         .select()
@@ -508,19 +506,27 @@ export async function replyToMessageWith(
         .orderBy(coreSchema.explorationQuestions.sequence),
       loadCurrentClaimRows(db, ctx, exploration.id),
     ]);
-    const recentUser = turns
-      .filter((t) => t.role === "user")
-      .slice(-6)
-      .map((t) => t.content)
-      .join("\n");
+    const context = await readConversationContext(db, ctx, turns);
+    const qualifiedMessage = context.turns.find((t) => t.sourceItemId === message.id);
+    if (!qualifiedMessage)
+      throw new CoreError("STALE_EXPLORATION_CONTEXT", 409, "这条消息当前不可用于对话");
     const prior = await loadPriorUnderstanding(db, ctx, {
       explorationId: exploration.id,
-      queryText: `${experience?.summary ?? ""}\n${recentUser}`,
+      queryText: `${context.matter}\n${context.recentUser}`,
     });
-    return { exploration, message, meta, experience, turns, questions, claims, prior };
+    return {
+      exploration,
+      message: { ...message, content: qualifiedMessage.content },
+      meta,
+      turns: context.turns,
+      questions: context.hasUnavailable ? [] : questions,
+      claims,
+      prior,
+      context,
+    };
   });
 
-  const { exploration, message, meta, experience, turns, questions, prior } = basis;
+  const { exploration, message, meta, turns, questions, prior, context } = basis;
   const claims = basis.claims.filter((claim) => claim.evidenceStatus === "valid");
   const ownClaims = claims.map((claim) => ({
     key: claim.key,
@@ -535,7 +541,7 @@ export async function replyToMessageWith(
     ...prior.claims.map((claim) => claim.key),
   ]);
   const input0 = [
-    `MATTER: ${experience?.summary ?? ""}`,
+    `MATTER: ${context.matter}`,
     "",
     historyText(turns, questions),
     "",
@@ -627,7 +633,7 @@ export async function replyToMessageWith(
         { reopen: true },
       );
       // The message itself must still be usable (not excluded or deleted meanwhile).
-      await assertEvidenceUsable(tx, ctx, [{ sourceItemId: message.id, assessmentVersion: null }]);
+      await assertConversationSourcesCurrent(tx, ctx, context.sources);
       // Every revision offered to the model must still be current with valid
       // evidence, and stay so until this commit: lock them (conversation row
       // first, then revisions in id order, as in all other commits). A

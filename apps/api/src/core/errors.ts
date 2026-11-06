@@ -1,4 +1,17 @@
 export type CoreErrorCode =
+  | "PI_REQUEST_LIMIT_REACHED"
+  | "PI_COST_LIMIT_REACHED"
+  | "PI_INPUT_LIMIT_REACHED"
+  | "PI_USER_ABORTED"
+  | "PI_ARCHIVE_STALE_DEPENDENCY"
+  | "PI_SOURCE_CHANGED_DURING_RUN"
+  | "PI_ARCHIVE_STALE_REVISION"
+  | "PI_OPENROUTER_ENDPOINT_REQUIRED"
+  | "PI_REPLY_FORMAT_INVALID"
+  | "PI_RECORD_FAILED"
+  | "PI_MODEL_ERROR"
+  | "PI_SESSION_BUSY"
+  | "SOURCE_NOT_ELIGIBLE"
   | "UNDERSTANDING_IMPORT_INVALID"
   | "ACCOUNT_DISABLED"
   | "DIAGNOSTIC_SCOPE_INVALID"
@@ -48,12 +61,12 @@ export type CoreErrorCode =
 
 export class CoreError extends Error {
   readonly code: CoreErrorCode;
-  readonly status: 202 | 400 | 403 | 404 | 409 | 422 | 503;
+  readonly status: 202 | 400 | 403 | 404 | 409 | 422 | 502 | 503;
   readonly details?: Record<string, unknown>;
 
   constructor(
     code: CoreErrorCode,
-    status: 202 | 400 | 403 | 404 | 409 | 422 | 503,
+    status: 202 | 400 | 403 | 404 | 409 | 422 | 502 | 503,
     message: string,
     details?: Record<string, unknown>,
   ) {

@@ -796,129 +796,185 @@ test("a correction still being processed is not reported as done", async ({ page
   expect(keys[1]).toBe(keys[0]);
 });
 
-test("new facts remain in chat until understanding is explicitly updated", async ({ page }) => {
-  const claim = {
-    claim_id: "c-one",
-    claim_revision_id: "r-one",
-    key: "one",
-    kind: "pattern",
-    mode: "observation",
-    text: "第一条合成认识。",
-    scope: "合成范围。",
-    confidence_level: "low",
-    confidence_basis: "合成。",
-  };
-  let replied = false;
-  let continued = 0;
-  const summary = {
-    id: "e5",
-    status: "active",
-    version: 2,
-    phase: "review",
-    started_at: "2026-11-05T00:00:00Z",
-    last_activity_at: "2026-11-05T00:00:00Z",
-    completed_at: null,
-    experience_id: "x",
-    summary: "合成的一件事",
-    open_question: null,
-    parked: false,
-    key_uncertainty: "还不确定",
-  };
-  await setup(page, async (route, path) => {
-    const method = route.request().method();
-    const url = new URL(route.request().url());
-    if (path === "/api/core/model-status")
-      return json(route, {
-        enabled: true,
-        window_hours: 24,
-        operation_limit: 30,
-        operations_used: 0,
-      }).then(() => true);
-    if (path === "/api/core/understanding")
-      return json(route, { state: "current", claims: [claim], needs_review: [] }).then(() => true);
-    if (path === "/api/core/understanding/changes")
-      return json(route, { items: [] }).then(() => true);
-    if (path === "/api/core/explorations" && method === "GET")
-      return json(route, {
-        items: url.searchParams.get("status") === "active" ? [summary] : [],
-      }).then(() => true);
-    if (path === "/api/core/explorations/e5" && method === "GET")
-      return json(route, {
-        id: "e5",
-        version: replied ? 4 : 2,
-        status: "active",
-        phase: "review",
-        open_question: null,
-        latest_step: null,
-        experience: { id: "x", summary: "合成的一件事", occurred_at: null, context: {} },
-        turns: replied
-          ? [
-              { id: "t1", role: "user", turnKind: "message", content: "后来有进展了。" },
-              { id: "t2", role: "assistant", turnKind: "reply", content: "合成回应：接住进展。" },
-            ]
-          : [],
-        pending: { corrections: [], messages: [], updates: replied ? [{ source_id: "m1" }] : [] },
-        understanding: { outcome: "provisional", claims: [claim], gaps: [], needs_review: [] },
-      }).then(() => true);
-    if (path === "/api/core/explorations/e5/messages")
-      return json(
-        route,
-        { exploration_id: "e5", version: 3, message_source_id: "m1", status: "pending" },
-        201,
-      ).then(() => true);
-    if (path === "/api/core/explorations/e5/reply") {
-      replied = true;
-      return json(
-        route,
-        {
-          exploration_id: "e5",
-          version: 4,
-          reply: "合成回应：接住进展。",
-          new_information: true,
-          new_information_note: "进展",
-        },
-        201,
-      ).then(() => true);
-    }
-    if (path === "/api/core/explorations/e5/continue") {
-      continued++;
-      return json(
-        route,
-        {
-          exploration_id: "e5",
-          version: 5,
-          phase: "awaiting_answer",
-          reading: { current_reading: "读数", key_uncertainty: null },
-          question: {
-            id: "q1",
-            sequence: 1,
-            status: "open",
-            question: "这次进展改变了什么？",
-            intent: "合成意图。",
-            quick_options: [],
+for (const delivery of ["direct", "queued", "queued-switch"]) {
+  test(`new facts remain in chat until understanding is explicitly updated (${delivery})`, async ({
+    page,
+  }) => {
+    const deferred = delivery !== "direct";
+    let refreshWaiting = false;
+    let releaseRefresh = () => {};
+    const refreshGate = new Promise<void>((resolve) => {
+      releaseRefresh = resolve;
+    });
+    const claim = {
+      claim_id: "c-one",
+      claim_revision_id: "r-one",
+      key: "one",
+      kind: "pattern",
+      mode: "observation",
+      text: "第一条合成认识。",
+      scope: "合成范围。",
+      confidence_level: "low",
+      confidence_basis: "合成。",
+    };
+    let replied = false;
+    let continued = 0;
+    let polls = 0;
+    let replyPosts = 0;
+    const summary = {
+      id: "e5",
+      status: "active",
+      version: 2,
+      phase: "review",
+      started_at: "2026-11-05T00:00:00Z",
+      last_activity_at: "2026-11-05T00:00:00Z",
+      completed_at: null,
+      experience_id: "x",
+      summary: "合成的一件事",
+      open_question: null,
+      parked: false,
+      key_uncertainty: "还不确定",
+    };
+    await setup(page, async (route, path) => {
+      const method = route.request().method();
+      const url = new URL(route.request().url());
+      if (path === "/api/core/model-status")
+        return json(route, {
+          enabled: true,
+          window_hours: 24,
+          operation_limit: 30,
+          operations_used: 0,
+        }).then(() => true);
+      if (path === "/api/core/understanding")
+        return json(route, { state: "current", claims: [claim], needs_review: [] }).then(
+          () => true,
+        );
+      if (path === "/api/core/understanding/changes")
+        return json(route, { items: [] }).then(() => true);
+      if (path === "/api/core/explorations" && method === "GET")
+        return json(route, {
+          items: url.searchParams.get("status") === "active" ? [summary] : [],
+        }).then(() => true);
+      if (path === "/api/core/explorations/e5" && method === "GET") {
+        if (delivery === "queued-switch" && replied) {
+          refreshWaiting = true;
+          await refreshGate;
+        }
+        return json(route, {
+          id: "e5",
+          version: replied ? 4 : 2,
+          status: "active",
+          phase: "review",
+          open_question: null,
+          latest_step: null,
+          experience: { id: "x", summary: "合成的一件事", occurred_at: null, context: {} },
+          turns: replied
+            ? [
+                { id: "t1", role: "user", turnKind: "message", content: "后来有进展了。" },
+                {
+                  id: "t2",
+                  role: "assistant",
+                  turnKind: deferred ? "pi_reply" : "reply",
+                  content: "合成回应：接住进展。",
+                },
+              ]
+            : [],
+          pending: { corrections: [], messages: [], updates: replied ? [{ source_id: "m1" }] : [] },
+          understanding: { outcome: "provisional", claims: [claim], gaps: [], needs_review: [] },
+        }).then(() => true);
+      }
+      if (path === "/api/core/explorations/e5/park") return json(route, {}).then(() => true);
+      if (path === "/api/core/explorations/e5/messages")
+        return json(
+          route,
+          { exploration_id: "e5", version: 3, message_source_id: "m1", status: "pending" },
+          201,
+        ).then(() => true);
+      if (path === "/api/core/model-operations/op-e5") {
+        polls++;
+        replied = polls > 1;
+        return json(route, { status: replied ? "completed" : "processing" }).then(() => true);
+      }
+      if (path === "/api/core/explorations/e5/reply") {
+        replyPosts++;
+        if (deferred)
+          return json(route, { status: "processing", operation_id: "op-e5" }, 202).then(() => true);
+        replied = true;
+        return json(
+          route,
+          {
+            exploration_id: "e5",
+            version: 4,
+            reply: "合成回应：接住进展。",
+            new_information: true,
+            new_information_note: "进展",
           },
-        },
-        201,
-      ).then(() => true);
+          201,
+        ).then(() => true);
+      }
+      if (path === "/api/core/explorations/e5/continue") {
+        continued++;
+        return json(
+          route,
+          {
+            exploration_id: "e5",
+            version: 5,
+            phase: "awaiting_answer",
+            reading: { current_reading: "读数", key_uncertainty: null },
+            question: {
+              id: "q1",
+              sequence: 1,
+              status: "open",
+              question: "这次进展改变了什么？",
+              intent: "合成意图。",
+              quick_options: [],
+            },
+          },
+          201,
+        ).then(() => true);
+      }
+      return false;
+    });
+    await page.getByRole("button", { name: "对话" }).click();
+    await page.getByRole("button", { name: "继续", exact: true }).click();
+    await page.getByLabel("接着说").fill("后来有进展了。");
+    await page.getByRole("button", { name: "发送" }).click();
+    if (delivery === "queued-switch") {
+      await expect.poll(() => refreshWaiting).toBe(true);
+      await page.getByRole("button", { name: "先暂缓", exact: true }).click();
+      await expect(page.getByLabel("说说一件具体的事")).toBeVisible();
+      const oldResponse = page.waitForResponse(
+        (response) => new URL(response.url()).pathname === "/api/core/explorations/e5",
+      );
+      releaseRefresh();
+      await (await oldResponse).finished();
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          ),
+      );
+      await expect.poll(() => polls).toBe(2);
+      await expect(page.getByLabel("说说一件具体的事")).toBeVisible();
+      await expect(page.getByText("合成回应：接住进展。")).toHaveCount(0);
+      expect(replyPosts).toBe(1);
+      return;
     }
-    return false;
+    await expect(page.getByText("合成回应：接住进展。")).toBeVisible();
+    await expect(page.getByLabel("接着说")).toBeEnabled();
+    await expect(page.getByText("这次进展改变了什么？")).toHaveCount(0);
+    await expect(
+      page.getByText("补充内容已保存在对话里，尚未单独整理为认识；可以继续聊，也可以按需更新。"),
+    ).toBeVisible();
+    expect(continued).toBe(0);
+    expect(replyPosts).toBe(1);
+    if (deferred) expect(polls).toBe(2);
+    await page.getByRole("button", { name: "更新认识", exact: true }).click();
+    await expect(page.getByText("这次进展改变了什么？")).toBeVisible();
+    expect(continued).toBe(1);
+    await expect(page.getByText("合成回应：接住进展。")).toBeVisible();
   });
-  await page.getByRole("button", { name: "对话" }).click();
-  await page.getByRole("button", { name: "继续", exact: true }).click();
-  await page.getByLabel("接着说").fill("后来有进展了。");
-  await page.getByRole("button", { name: "发送" }).click();
-  await expect(page.getByText("合成回应：接住进展。")).toBeVisible();
-  await expect(page.getByLabel("接着说")).toBeEnabled();
-  await expect(page.getByText("这次进展改变了什么？")).toHaveCount(0);
-  await expect(
-    page.getByText("补充内容已保存在对话里，尚未单独整理为认识；可以继续聊，也可以按需更新。"),
-  ).toBeVisible();
-  expect(continued).toBe(0);
-  await page.getByRole("button", { name: "更新认识", exact: true }).click();
-  await expect(page.getByText("这次进展改变了什么？")).toBeVisible();
-  expect(continued).toBe(1);
-  await expect(page.getByText("合成回应：接住进展。")).toBeVisible();
-});
+}
 
 test("a first message whose reply failed is retried as a reply, not as exploration", async ({
   page,

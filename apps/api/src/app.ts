@@ -4,11 +4,12 @@ import { cors } from "hono/cors";
 import { type AccountSessionProvider, accountSessionAccess } from "./auth/account.js";
 import { invalidateCloudSources } from "./cloud-diagnostic/effects.js";
 import type { CloudServices } from "./cloud-diagnostic/runtime.js";
-import { withProfileTransaction } from "./cloud-diagnostic/scope.js";
+import { lockPiProfileState, withProfileTransaction } from "./cloud-diagnostic/scope.js";
 import { createCoreReportBackend } from "./core/report-source-service.js";
 import { readAccountHealth } from "./health.js";
 import type { createGateway } from "./llm/gateway.js";
 import { onError } from "./middleware/error.js";
+import type { PiReplyHandler } from "./personal-understanding/pi-conversation.js";
 import { accountCoreModelRoutes } from "./routes/account-core-model.js";
 import {
   cloudBlobRoutes,
@@ -36,6 +37,7 @@ export function createApp(opts: {
   cloud: CloudServices;
   auth: AuthOpts;
   gateway?: LlmGateway;
+  piReply?: PiReplyHandler;
   /** Automatic Core processing; absent or 0 keeps those endpoints off. */
   coreModel?: { dailyOperationLimit: number };
   /** Called after the model settings change so the runtime can reload them. */
@@ -95,6 +97,7 @@ export function createApp(opts: {
     const ctx = await contextFor(c);
     // Core endpoints are model-free here; paid diagnostics use the durable processing queue.
     return withProfileTransaction(opts.db, ctx, async (tx) => {
+      if (c.req.method !== "GET") await lockPiProfileState(tx, ctx);
       const scoped = tx as unknown as Db;
       const router = new Hono().route(
         "/api/core",
@@ -126,6 +129,7 @@ export function createApp(opts: {
       gateway: opts.coreModel ? opts.gateway : undefined,
       contextFor,
       dailyOperationLimit: opts.coreModel?.dailyOperationLimit ?? 0,
+      piReply: opts.piReply,
     }),
   );
   api.route("/core", root);

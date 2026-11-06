@@ -10,7 +10,7 @@ import {
 } from "../core/source-invalidation.js";
 import { invalidateCloudSources } from "./effects.js";
 import { cloudSourceHash } from "./repository.js";
-import { withProfileTransaction } from "./scope.js";
+import { lockPiProfileState, withProfileTransaction } from "./scope.js";
 const SourceAction = z
   .object({
     action: z.enum(["exclude", "restore", "delete"]),
@@ -67,6 +67,7 @@ export class CloudLifecycleService {
       throw new Error("DELETE_CONFIRMATION_REQUIRED");
     const hash = await requestHash({ id, ...input });
     return withProfileTransaction(this.db, ctx, async (tx) => {
+      await lockPiProfileState(tx, ctx);
       await tx.execute(
         sql`select pg_advisory_xact_lock(hashtextextended(${JSON.stringify([ctx, key, "source-lifecycle"])},0))`,
       );
@@ -254,6 +255,7 @@ export class CloudLifecycleService {
     if (!key.trim() || key.length > 200) throw new Error("IDEMPOTENCY_KEY_REQUIRED");
     if (id === input.replacement_source_id) throw new Error("SOURCE_REBIND_SELF");
     return withProfileTransaction(this.db, ctx, async (tx) => {
+      await lockPiProfileState(tx, ctx);
       await tx.execute(
         sql`select pg_advisory_xact_lock(hashtextextended(${JSON.stringify([ctx, key, "source-rebind"])},0))`,
       );

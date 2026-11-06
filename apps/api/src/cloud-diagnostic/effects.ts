@@ -1,7 +1,7 @@
 import { coreSchema as c, diagnosticSchema as d, platformSchema as p } from "@findme/db";
 import { and, eq, inArray, ne, or, sql } from "drizzle-orm";
 import type { PersonalContext } from "../core/exploration-service.js";
-import type { ProfileTransaction } from "./scope.js";
+import { type ProfileTransaction, lockPiProfileState } from "./scope.js";
 /** Scope-limited invalidation; no model calls and no unrelated report regeneration. */
 export async function invalidateCloudSources(
   tx: ProfileTransaction,
@@ -10,9 +10,10 @@ export async function invalidateCloudSources(
   hard = false,
 ) {
   if (!ids.length) return { reports: 0, jobs: 0 };
+  await lockPiProfileState(tx, ctx);
   // Snapshots contain tool results and compressed quotations as well as messages.
   // Exclusion and hard deletion both clear every matching historical revision.
-  await tx
+  const invalidatedPiArchives = await tx
     .update(c.piSessionArchives)
     .set({ archive: null, status: "stale" })
     .where(
@@ -24,7 +25,97 @@ export async function invalidateCloudSources(
           sql`, `,
         )}))`,
       ),
-    );
+    )
+    .returning({ conversationId: c.piSessionArchives.conversationId });
+  const piConversationIds = [...new Set(invalidatedPiArchives.map((row) => row.conversationId))];
+  if (piConversationIds.length) {
+    // Keep the established operation -> exploration lock order used by reply commits.
+    const piOperations = await tx
+      .select({ id: c.coreOperations.id })
+      .from(c.coreOperations)
+      .where(
+        and(
+          eq(c.coreOperations.tenantId, ctx.tenantId),
+          eq(c.coreOperations.subjectId, ctx.subjectId),
+          sql`${c.coreOperations.explorationId}::text in (${sql.join(
+            piConversationIds.map((id) => sql`${id}`),
+            sql`, `,
+          )})`,
+          sql`${c.coreOperations.responseBody}->>'engine' = 'pi'`,
+        ),
+      )
+      .orderBy(c.coreOperations.id)
+      .for("update");
+    if (piOperations.length)
+      await tx
+        .update(c.coreOperations)
+        .set({
+          responseBody: null,
+          responseStatus: null,
+          status: "stale",
+        })
+        .where(
+          inArray(
+            c.coreOperations.id,
+            piOperations.map((row) => row.id),
+          ),
+        );
+    // A native reply can carry quotations from another session's source. Clear
+    // the derived pi turns as well as the private snapshot so later rebuilding
+    // cannot read those quotations back through the public conversation log.
+    const native = await tx
+      .select({ id: c.explorations.id })
+      .from(c.explorations)
+      .where(
+        and(
+          eq(c.explorations.tenantId, ctx.tenantId),
+          eq(c.explorations.subjectId, ctx.subjectId),
+          sql`${c.explorations.id}::text in (${sql.join(
+            piConversationIds.map((id) => sql`${id}`),
+            sql`, `,
+          )})`,
+        ),
+      )
+      .orderBy(c.explorations.id)
+      .for("update");
+    const nativeIds = native.map((row) => row.id);
+    if (nativeIds.length) {
+      const cleared = await tx
+        .update(c.explorationTurns)
+        .set({ content: "" })
+        .where(
+          and(
+            inArray(c.explorationTurns.explorationId, nativeIds),
+            eq(c.explorationTurns.role, "assistant"),
+            eq(c.explorationTurns.turnKind, "pi_reply"),
+            ne(c.explorationTurns.content, ""),
+          ),
+        )
+        .returning({ id: c.explorationTurns.id });
+      if (cleared.length) {
+        const turnIds = cleared.map((row) => row.id);
+        await tx
+          .update(c.sourceItems)
+          .set({
+            sourceMeta: sql`jsonb_set(coalesce(${c.sourceItems.sourceMeta}, '{}'::jsonb), '{reply}', '{"redacted":true}'::jsonb)`,
+          })
+          .where(
+            and(
+              eq(c.sourceItems.tenantId, ctx.tenantId),
+              eq(c.sourceItems.subjectId, ctx.subjectId),
+              sql`${c.sourceItems.sourceMeta}->'reply'->>'turn_id' in (${sql.join(
+                turnIds.map((id) => sql`${id}`),
+                sql`, `,
+              )})`,
+            ),
+          );
+      }
+      await tx
+        .update(c.explorations)
+        .set({ version: sql`${c.explorations.version}+1` })
+        .where(inArray(c.explorations.id, nativeIds));
+    }
+  }
   const links = await tx
     .select()
     .from(d.diagnosticReportSources)

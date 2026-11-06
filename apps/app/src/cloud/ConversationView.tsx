@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { CloudApiError, cloudMutation, cloudRequest, isProcessingReply } from "../cloud-api";
 import type {
   ClaimView,
@@ -122,6 +122,12 @@ export function ConversationView({ resumeId }: { resumeId?: string | null } = {}
   // The saved conversation of the open matter, shown whatever the analysis
   // step is (asking, processing, failed or done).
   const [thread, setThread] = useState<ExplorationView | null>(null);
+  // Any new action or unmount invalidates pending reads from the previous view.
+  const viewGeneration = useRef(0);
+  function compose() {
+    viewGeneration.current++;
+    setStep({ kind: "compose" });
+  }
 
   const refresh = useCallback(async () => {
     const [s, c, active, completed] = await Promise.all([
@@ -140,6 +146,7 @@ export function ConversationView({ resumeId }: { resumeId?: string | null } = {}
   }, []);
 
   async function run(fn: () => Promise<void>) {
+    viewGeneration.current++;
     setBusy(true);
     setError("");
     setNotice("");
@@ -181,10 +188,11 @@ export function ConversationView({ resumeId }: { resumeId?: string | null } = {}
 
   /** Adds the saved thread and pending inputs to a result already shown. */
   async function attachView(id: string) {
+    const generation = viewGeneration.current;
     const view = await cloudRequest<ExplorationView>(`/api/core/explorations/${id}`).catch(
       () => null,
     );
-    if (!view) return;
+    if (!view || generation !== viewGeneration.current) return;
     setThread(view);
     setStep((prev) =>
       prev.kind === "done" && prev.data.exploration_id === id && prev.data.version === view.version
@@ -193,8 +201,10 @@ export function ConversationView({ resumeId }: { resumeId?: string | null } = {}
     );
   }
 
-  async function resume(id: string, allowProceed = true) {
+  async function resume(id: string, allowProceed = true, generation = viewGeneration.current) {
+    if (generation !== viewGeneration.current) return;
     const view = await cloudRequest<ExplorationView>(`/api/core/explorations/${id}`);
+    if (generation !== viewGeneration.current) return;
     setThread(view);
     if (view.phase === "awaiting_answer" && view.open_question)
       return setStep({
@@ -210,7 +220,9 @@ export function ConversationView({ resumeId }: { resumeId?: string | null } = {}
           question: view.open_question,
         },
       });
-    const talking = (view.turns ?? []).some((turn) => turn.turnKind === "reply");
+    const talking = (view.turns ?? []).some((turn) =>
+      ["reply", "pi_reply"].includes(turn.turnKind),
+    );
     // A message still waiting for its reply is retried as a reply, never as exploration.
     const waiting = !!view.pending?.messages?.length;
     if (view.phase === "ready_to_plan" && !talking && !waiting)
@@ -246,23 +258,62 @@ export function ConversationView({ resumeId }: { resumeId?: string | null } = {}
   useEffect(() => {
     void refresh().catch((e) => setError(explain(e)));
     if (resumeId) void run(() => resume(resumeId, false));
+    return () => {
+      viewGeneration.current++;
+    };
   }, [refresh, resumeId]);
+
+  async function pollReply(id: string, operationId: string, generation: number) {
+    try {
+      // Only GETs: timeout or failure never spends another model operation.
+      for (let attempt = 0; attempt < 180; attempt++) {
+        if (generation !== viewGeneration.current) return;
+        const operation = await cloudRequest<{
+          status: "processing" | "completed" | "failed" | "stale";
+          error?: { code?: string };
+        }>(`/api/core/model-operations/${encodeURIComponent(operationId)}`);
+        if (generation !== viewGeneration.current) return;
+        if (operation.status !== "processing") {
+          await resume(id, false, generation);
+          if (generation !== viewGeneration.current) return;
+          setNotice(
+            operation.status === "completed"
+              ? "回应已生成。"
+              : `消息已保存，${operation.error?.code ? explain(new CloudApiError(503, operation.error.code)) : "这次回应未完成，可以重新处理。"}`,
+          );
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+      if (generation === viewGeneration.current)
+        setNotice("消息已保存，回应等待时间较长。请刷新状态确认结果后再重试。");
+    } catch (e) {
+      if (generation === viewGeneration.current)
+        setNotice(`消息已保存，暂时无法读取处理状态。请刷新确认。${explain(e)}`);
+    }
+  }
 
   /** Ordinary chat only replies; understanding is updated on explicit request. */
   async function respond(id: string, version: number, sourceId: string) {
+    const generation = viewGeneration.current;
     try {
-      const reply = await cloudMutation<Reply | { status: "processing" }>(
+      const reply = await cloudMutation<Reply | { status: "processing"; operation_id: string }>(
         `/api/core/explorations/${id}/reply`,
         { expected_version: version, message_source_id: sourceId },
       );
+      if (generation !== viewGeneration.current) return;
       if (isProcessingReply(reply)) {
-        setNotice("回应仍在生成，稍后刷新查看。");
-        return resume(id, false);
+        setNotice("回应正在生成，完成后会自动显示。");
+        await resume(id, false);
+        void pollReply(id, reply.operation_id, generation);
+        return;
       }
       await resume(id, false);
+      if (generation !== viewGeneration.current) return;
       if (reply.new_information)
         setNotice("新信息已保存在对话里。需要时可以单独更新认识，也可以继续聊。");
     } catch (e) {
+      if (generation !== viewGeneration.current) return;
       setNotice(`消息已保存。${explain(e)}`);
       return resume(id, false);
     }
@@ -483,11 +534,7 @@ export function ConversationView({ resumeId }: { resumeId?: string | null } = {}
           >
             重新处理
           </button>
-          <button
-            type="button"
-            className="button secondary"
-            onClick={() => setStep({ kind: "compose" })}
-          >
+          <button type="button" className="button secondary" onClick={compose}>
             先换个话题
           </button>
         </div>
@@ -555,7 +602,7 @@ export function ConversationView({ resumeId }: { resumeId?: string | null } = {}
             version={step.data.version}
             busy={busy}
             run={run}
-            done={() => setStep({ kind: "compose" })}
+            done={compose}
           />
         </div>
       )}
@@ -802,7 +849,7 @@ export function ConversationView({ resumeId }: { resumeId?: string | null } = {}
                       expected_version: step.data.version,
                       parked: true,
                     });
-                    setStep({ kind: "compose" });
+                    compose();
                   })
                 }
               >
@@ -815,14 +862,10 @@ export function ConversationView({ resumeId }: { resumeId?: string | null } = {}
                 version={step.data.version}
                 busy={busy}
                 run={run}
-                done={() => setStep({ kind: "compose" })}
+                done={compose}
               />
             ) : (
-              <button
-                type="button"
-                className="button secondary"
-                onClick={() => setStep({ kind: "compose" })}
-              >
+              <button type="button" className="button secondary" onClick={compose}>
                 返回
               </button>
             )}

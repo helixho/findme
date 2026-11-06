@@ -9,6 +9,7 @@ import { withProfileTransaction } from "../src/cloud-diagnostic/scope.js";
 import {
   PiArchiveRepository,
   SqlPiArchiveDatabase,
+  assertPiDependenciesCurrent,
   piArchiveFingerprint,
   validatePiArchive,
 } from "../src/personal-understanding/pi-archive.js";
@@ -147,13 +148,97 @@ it("archives pi sources idempotently, isolates Profiles, and clears every snapsh
         },
       ],
     };
+    const native = await withProfileTransaction(db.db, ctx, async (tx) => {
+      const [experience] = await tx
+        .insert(coreSchema.experiences)
+        .values({ ...ctx, summary: "synthetic topic" })
+        .returning();
+      const [conversation] = await tx
+        .insert(coreSchema.explorations)
+        .values({ ...ctx, experienceId: experience!.id })
+        .returning();
+      const [unaffected] = await tx
+        .insert(coreSchema.explorations)
+        .values({ ...ctx, experienceId: experience!.id })
+        .returning();
+      const [piTurn] = await tx
+        .insert(coreSchema.explorationTurns)
+        .values({
+          explorationId: conversation!.id,
+          role: "assistant",
+          turnKind: "pi_reply",
+          content: "quoted from excluded source",
+        })
+        .returning();
+      await tx.insert(coreSchema.explorationTurns).values([
+        {
+          explorationId: conversation!.id,
+          role: "assistant",
+          turnKind: "reply",
+          content: "legacy reply remains",
+        },
+        {
+          explorationId: unaffected!.id,
+          role: "assistant",
+          turnKind: "pi_reply",
+          content: "unrelated pi reply remains",
+        },
+      ]);
+      const [operation] = await tx
+        .insert(coreSchema.coreOperations)
+        .values({
+          ...ctx,
+          explorationId: conversation!.id,
+          idempotencyKey: randomUUID(),
+          operationType: "exploration_reply",
+          requestHash: "synthetic",
+          status: "completed",
+          responseStatus: 201,
+          responseBody: { engine: "pi", reply: "quoted from excluded source" },
+        })
+        .returning();
+      const [legacyOperation] = await tx
+        .insert(coreSchema.coreOperations)
+        .values({
+          ...ctx,
+          explorationId: conversation!.id,
+          idempotencyKey: randomUUID(),
+          operationType: "exploration_reply",
+          requestHash: "synthetic",
+          status: "completed",
+          responseStatus: 201,
+          responseBody: { reply: "legacy reply remains" },
+        })
+        .returning();
+      return {
+        conversationId: conversation!.id,
+        unaffectedId: unaffected!.id,
+        piTurnId: piTurn!.id,
+        operationId: operation!.id,
+        legacyOperationId: legacyOperation!.id,
+      };
+    });
     const input = {
       scope: ctx,
-      conversationId: randomUUID(),
+      conversationId: native.conversationId,
       expectedRevision: 0,
       dependencies,
       archive,
     };
+    await expect(
+      withProfileTransaction(db.db, ctx, async (tx) => {
+        const bound = new PiArchiveRepository(SqlPiArchiveDatabase.forTransaction(tx, ctx));
+        await bound.save(input);
+        throw new Error("synthetic rollback");
+      }),
+    ).rejects.toThrow("synthetic rollback");
+    expect(await repository.restore(ctx, input.conversationId, archive.sessionId)).toBeNull();
+    await withProfileTransaction(db.db, ctx, async (tx) => {
+      const bound = SqlPiArchiveDatabase.forTransaction(tx, ctx);
+      await expect(bound.scoped(other, async () => null)).rejects.toThrow(
+        "PI_ARCHIVE_SCOPE_MISMATCH",
+      );
+    });
     const first = await repository.save(input);
     expect(first.revision).toBe(1);
     expect((await repository.save(input)).revision).toBe(1);
@@ -186,6 +271,50 @@ it("archives pi sources idempotently, isolates Profiles, and clears every snapsh
     await withProfileTransaction(db.db, ctx, async (tx) => {
       await tx
         .update(coreSchema.sourceItems)
+        .set({
+          sourceMeta: {
+            reply_status: "replied",
+            understanding_status: "pending",
+            reply: { output: "synthetic reply", turn_id: native.piTurnId },
+          },
+        })
+        .where(eq(coreSchema.sourceItems.id, source.id));
+    });
+    expect(await sql.captureDependencies(ctx, [source.id])).toEqual(dependencies);
+    expect((await repository.restore(ctx, input.conversationId, archive.sessionId))?.status).toBe(
+      "available",
+    );
+    await withProfileTransaction(db.db, ctx, (tx) =>
+      assertPiDependenciesCurrent(tx, ctx, dependencies),
+    );
+    await withProfileTransaction(db.db, ctx, async (tx) => {
+      await tx
+        .update(coreSchema.sourceItems)
+        .set({ content: "changed original" })
+        .where(eq(coreSchema.sourceItems.id, source.id));
+    });
+    const stale = await repository.restore(ctx, input.conversationId, archive.sessionId);
+    expect(stale?.status).toBe("rebuild_required");
+    expect(stale?.revision).toBe(2);
+    expect(stale?.dependencies).toEqual(dependencies);
+    await expect(
+      withProfileTransaction(db.db, ctx, (tx) =>
+        assertPiDependenciesCurrent(tx, ctx, dependencies),
+      ),
+    ).rejects.toThrow("PI_ARCHIVE_STALE_DEPENDENCY");
+    const refreshedDependencies = await sql.captureDependencies(ctx, [source.id]);
+    expect(
+      (
+        await repository.save({
+          ...input,
+          dependencies: refreshedDependencies,
+          expectedRevision: 2,
+        })
+      ).revision,
+    ).toBe(3);
+    await withProfileTransaction(db.db, ctx, async (tx) => {
+      await tx
+        .update(coreSchema.sourceItems)
         .set({ usageStatus: "excluded" })
         .where(eq(coreSchema.sourceItems.id, source.id));
       await invalidateCloudSources(tx, ctx, [source.id]);
@@ -197,8 +326,38 @@ it("archives pi sources idempotently, isolates Profiles, and clears every snapsh
     const rows = await withProfileTransaction(db.db, ctx, (tx) =>
       tx.select().from(coreSchema.piSessionArchives),
     );
-    expect(rows).toHaveLength(2);
+    expect(rows).toHaveLength(3);
     expect(rows.every((row) => row.archive === null && row.status === "stale")).toBe(true);
+    const afterInvalidation = await withProfileTransaction(db.db, ctx, async (tx) => ({
+      turns: await tx.select().from(coreSchema.explorationTurns),
+      conversations: await tx.select().from(coreSchema.explorations),
+      operations: await tx.select().from(coreSchema.coreOperations),
+      sources: await tx
+        .select()
+        .from(coreSchema.sourceItems)
+        .where(eq(coreSchema.sourceItems.id, source.id)),
+    }));
+    expect(afterInvalidation.turns.find((t) => t.id === native.piTurnId)?.content).toBe("");
+    expect(afterInvalidation.turns.some((t) => t.content === "legacy reply remains")).toBe(true);
+    expect(afterInvalidation.turns.some((t) => t.content === "unrelated pi reply remains")).toBe(
+      true,
+    );
+    expect(
+      afterInvalidation.conversations.find((t) => t.id === native.conversationId)?.version,
+    ).toBe(2);
+    expect(afterInvalidation.conversations.find((t) => t.id === native.unaffectedId)?.version).toBe(
+      1,
+    );
+    expect(afterInvalidation.sources[0]?.content).toBe("changed original");
+    expect(afterInvalidation.sources[0]?.sourceMeta?.reply).toEqual({ redacted: true });
+    const invalidatedOperation = afterInvalidation.operations.find(
+      (op) => op.id === native.operationId,
+    );
+    expect(invalidatedOperation?.responseBody).toBeNull();
+    expect(invalidatedOperation?.status).toBe("stale");
+    expect(
+      afterInvalidation.operations.find((op) => op.id === native.legacyOperationId)?.responseBody,
+    ).toEqual({ reply: "legacy reply remains" });
   } finally {
     await Promise.all([db.sql.end(), identity.sql.end()]);
   }

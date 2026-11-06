@@ -5,7 +5,7 @@ import { and, count, eq, gt, inArray, ne, sql } from "drizzle-orm";
 import { type Context, Hono } from "hono";
 import { z } from "zod";
 import { invalidateCloudSources } from "../cloud-diagnostic/effects.js";
-import { withProfileTransaction } from "../cloud-diagnostic/scope.js";
+import { lockPiProfileState, withProfileTransaction } from "../cloud-diagnostic/scope.js";
 import { replyToMessageWith } from "../core/conversation.js";
 import { CoreError } from "../core/errors.js";
 import { continueExplorationWith } from "../core/exploration-planning.js";
@@ -13,7 +13,12 @@ import { loadExploration } from "../core/exploration-reading.js";
 import { correctUnderstandingWith } from "../core/exploration-revision.js";
 import type { CoreStore, PersonalContext } from "../core/exploration-types.js";
 import type { CoreGateway } from "../core/llm.js";
-import { beginCoreOperation, markCoreOperationFailed } from "../core/operations.js";
+import {
+  beginCoreOperation,
+  getCoreOperation,
+  markCoreOperationFailed,
+} from "../core/operations.js";
+import type { PiReplyHandler } from "../personal-understanding/pi-conversation.js";
 
 /**
  * Account-mode Core operations that call the model. Owner decision (2026-10-31):
@@ -36,6 +41,9 @@ export const CORE_MODEL_MAX_CALLS_PER_OPERATION = 4;
 export type AccountCoreModelOptions = {
   db: Db;
   gateway?: CoreGateway;
+  piReply?: PiReplyHandler;
+  /** Bound HTTP waiting; background execution retains the same reserved operation. */
+  piSynchronousWaitMs?: number;
   contextFor: (c: Context) => Promise<PersonalContext>;
   dailyOperationLimit: number;
 };
@@ -77,7 +85,10 @@ export function singleAttemptGateway(gateway: CoreGateway): CoreGateway {
 
 export function profileCoreStore(db: Db, ctx: PersonalContext): CoreStore {
   const run = <T>(work: (db: Db) => Promise<T>) =>
-    withProfileTransaction(db, ctx, (tx) => work(tx as unknown as Db));
+    withProfileTransaction(db, ctx, async (tx) => {
+      await lockPiProfileState(tx, ctx);
+      return work(tx as unknown as Db);
+    });
   return { read: run, write: run };
 }
 
@@ -133,6 +144,25 @@ export function accountCoreModelRoutes(options: AccountCoreModelOptions) {
     });
   });
 
+  r.get("/model-operations/:id", async (c) => {
+    const ctx = await options.contextFor(c);
+    const id = z.string().uuid().parse(c.req.param("id"));
+    const operation = await withProfileTransaction(db, ctx, (tx) =>
+      getCoreOperation(tx as unknown as Db, ctx, id),
+    );
+    if (!operation) throw new CoreError("NOT_FOUND", 404, "处理记录不存在");
+    const expired =
+      operation.status === "processing" &&
+      (!operation.leaseExpiresAt || operation.leaseExpiresAt.getTime() <= Date.now());
+    return c.json({
+      status: expired ? "stale" : operation.status,
+      ...(operation.status === "completed" ? { response: operation.responseBody } : {}),
+      ...(operation.status === "failed" && operation.responseBody?.error
+        ? { error: operation.responseBody.error }
+        : {}),
+    });
+  });
+
   async function run(
     c: Context,
     args: {
@@ -146,6 +176,7 @@ export function accountCoreModelRoutes(options: AccountCoreModelOptions) {
   ) {
     const key = idempotencyKey(c);
     const operation = await withProfileTransaction(db, args.ctx, async (tx) => {
+      await lockPiProfileState(tx, args.ctx);
       const scoped = tx as unknown as Db;
       // Resolve ownership first: an operation row naming another Profile's
       // exploration is rejected by RLS and would abort this transaction.
@@ -216,26 +247,63 @@ export function accountCoreModelRoutes(options: AccountCoreModelOptions) {
       return c.json({ operation_id: operation.operationId, status: "processing" }, 202);
 
     const store = profileCoreStore(db, args.ctx);
+    const execute = async () => {
+      try {
+        const result = await args.execute(store, operation.operationId);
+        const source = typeof result.source_id === "string" ? result.source_id : undefined;
+        if (source)
+          await withProfileTransaction(db, args.ctx, (tx) =>
+            invalidateCloudSources(tx, args.ctx, [source]),
+          );
+        return c.json(result, 201);
+      } catch (error) {
+        const stale =
+          error instanceof CoreError &&
+          (error.code === "STALE_VERSION" || error.code === "STALE_CLAIM_REVISION");
+        await withProfileTransaction(db, args.ctx, async (tx) => {
+          await lockPiProfileState(tx, args.ctx);
+          await markCoreOperationFailed(
+            tx as unknown as Db,
+            operation.operationId,
+            stale ? "stale" : "failed",
+          );
+          if (
+            options.piReply &&
+            args.operationType === "exploration_reply" &&
+            error instanceof CoreError
+          )
+            await tx
+              .update(coreSchema.coreOperations)
+              .set({ responseBody: { error: { code: error.code, message: error.message } } })
+              .where(
+                and(
+                  eq(coreSchema.coreOperations.id, operation.operationId),
+                  eq(coreSchema.coreOperations.status, "failed"),
+                ),
+              );
+        }).catch(() => undefined);
+        throw error;
+      }
+    };
+    if (!options.piReply || args.operationType !== "exploration_reply") return execute();
+    const task = execute();
+    // The same durable reservation continues after HTTP 202; polling is read-only.
+    // Catch a late rejection because its failed status is already persisted above.
+    void task.catch(() => undefined);
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      const result = await args.execute(store, operation.operationId);
-      const source = typeof result.source_id === "string" ? result.source_id : undefined;
-      if (source)
-        await withProfileTransaction(db, args.ctx, (tx) =>
-          invalidateCloudSources(tx, args.ctx, [source]),
-        );
-      return c.json(result, 201);
-    } catch (error) {
-      const stale =
-        error instanceof CoreError &&
-        (error.code === "STALE_VERSION" || error.code === "STALE_CLAIM_REVISION");
-      await withProfileTransaction(db, args.ctx, (tx) =>
-        markCoreOperationFailed(
-          tx as unknown as Db,
-          operation.operationId,
-          stale ? "stale" : "failed",
-        ),
-      ).catch(() => undefined);
-      throw error;
+      return await Promise.race([
+        task,
+        new Promise<Response>((resolve) => {
+          timer = setTimeout(
+            () =>
+              resolve(c.json({ operation_id: operation.operationId, status: "processing" }, 202)),
+            options.piSynchronousWaitMs ?? 8000,
+          );
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
     }
   }
 
@@ -285,7 +353,10 @@ export function accountCoreModelRoutes(options: AccountCoreModelOptions) {
       request: input,
       explorationId: input.exploration_id,
       basisVersion: input.expected_version,
-      execute: (store, operationId) => replyToMessageWith(store, model, ctx, input, operationId),
+      execute: (store, operationId) =>
+        options.piReply
+          ? options.piReply(ctx, input, operationId)
+          : replyToMessageWith(store, model, ctx, input, operationId),
     });
   });
 

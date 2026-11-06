@@ -1,7 +1,11 @@
 import { createHash } from "node:crypto";
 import { type Db, coreSchema as c } from "@findme/db";
 import { and, desc, eq, sql } from "drizzle-orm";
-import { type ProfileTransaction, withProfileTransaction } from "../cloud-diagnostic/scope.js";
+import {
+  type ProfileTransaction,
+  lockPiProfileState,
+  withProfileTransaction,
+} from "../cloud-diagnostic/scope.js";
 import type { PiSessionArchive } from "./pi-runtime.js";
 
 /** Database source identity; no source text is duplicated in dependency metadata. */
@@ -163,6 +167,8 @@ export class PiArchiveRepository {
         return {
           status: "rebuild_required" as const,
           reason: "source_changed_or_unavailable" as const,
+          revision: record.revision,
+          dependencies: structuredClone(record.dependencies),
         };
       if (
         !sameScope(record.scope, scoped) ||
@@ -177,10 +183,13 @@ export class PiArchiveRepository {
         return {
           status: "rebuild_required" as const,
           reason: "source_changed_or_unavailable" as const,
+          revision: record.revision,
+          dependencies: structuredClone(record.dependencies),
         };
       return {
         status: "available" as const,
         revision: record.revision,
+        dependencies: structuredClone(record.dependencies),
         archive: structuredClone(record.archive),
       };
     });
@@ -214,77 +223,163 @@ async function dependencyFingerprint(tx: ProfileTransaction, scope: PiArchiveSco
     !["eligible", "context_only"].includes(assessment.eligibility)
   )
     return null;
-  return createHash("sha256").update(canonicalJson({ source, assessment })).digest("hex");
+  const metadata = source.sourceMeta ?? {};
+  const semanticMeta = Object.fromEntries(
+    [
+      "namespace",
+      "external_id",
+      "sequence",
+      "role",
+      "message_kind",
+      "original_recorded_at",
+      "original_time_basis",
+      "root_id",
+      "owner_confirmed",
+      "about",
+      "stance",
+      "free_text",
+      "exploration_id",
+      "correction_type",
+      "claim_revision_ids",
+      "context",
+      "answer_binding",
+    ]
+      .filter((key) => Object.hasOwn(metadata, key))
+      .map((key) => [key, metadata[key]]),
+  );
+  return createHash("sha256")
+    .update(
+      canonicalJson({
+        source: {
+          id: source.id,
+          tenantId: source.tenantId,
+          subjectId: source.subjectId,
+          sourceKind: source.sourceKind,
+          authorKind: source.authorKind,
+          content: source.content,
+          occurredAt: source.occurredAt,
+          usageStatus: source.usageStatus,
+          semanticMeta,
+        },
+        assessment: {
+          version: assessment.version,
+          attributionStatus: assessment.attributionStatus,
+          contextCompleteness: assessment.contextCompleteness,
+          temporalPrecision: assessment.temporalPrecision,
+          eligibility: assessment.eligibility,
+        },
+      }),
+    )
+    .digest("hex");
+}
+
+/** Capture in the same transaction that reads tool text; locks prevent a mixed-version result. */
+export async function capturePiDependencies(
+  tx: ProfileTransaction,
+  scope: PiArchiveScope,
+  ids: readonly string[],
+) {
+  await lockPiProfileState(tx, scope);
+  const result: PiArchiveDependency[] = [];
+  for (const sourceId of [...new Set(ids)].sort()) {
+    const fingerprint = await dependencyFingerprint(tx, scope, sourceId);
+    if (!fingerprint) throw new Error("PI_ARCHIVE_STALE_DEPENDENCY");
+    result.push({ sourceId, fingerprint });
+  }
+  return validateDependencies(result);
+}
+
+/** Recheck under the caller's commit transaction; acquired SHARE locks last until commit. */
+export async function assertPiDependenciesCurrent(
+  tx: ProfileTransaction,
+  scope: PiArchiveScope,
+  dependencies: readonly PiArchiveDependency[],
+) {
+  for (const dependency of validateDependencies(dependencies)) {
+    if ((await dependencyFingerprint(tx, scope, dependency.sourceId)) !== dependency.fingerprint)
+      throw new Error("PI_ARCHIVE_STALE_DEPENDENCY");
+  }
 }
 
 export class SqlPiArchiveDatabase implements PiArchiveDatabase {
   constructor(private readonly db: Db) {}
+  /** Caller owns the Profile transaction and its commit; no nested transaction is opened. */
+  static forTransaction(tx: ProfileTransaction, scope: PiArchiveScope): PiArchiveDatabase {
+    const boundScope = structuredClone(scope);
+    return {
+      async scoped<T>(
+        requested: PiArchiveScope,
+        work: (archive: PiArchiveTransaction) => Promise<T>,
+      ) {
+        if (!sameScope(boundScope, requested)) throw new Error("PI_ARCHIVE_SCOPE_MISMATCH");
+        return work(archiveTransaction(tx, boundScope));
+      },
+    };
+  }
+
   async captureDependencies(scope: PiArchiveScope, ids: readonly string[]) {
-    return withProfileTransaction(this.db, scope, async (tx) => {
-      const result: PiArchiveDependency[] = [];
-      for (const sourceId of [...new Set(ids)].sort()) {
-        const fingerprint = await dependencyFingerprint(tx, scope, sourceId);
-        if (!fingerprint) throw new Error("PI_ARCHIVE_STALE_DEPENDENCY");
-        result.push({ sourceId, fingerprint });
-      }
-      return validateDependencies(result);
-    });
+    return withProfileTransaction(this.db, scope, (tx) => capturePiDependencies(tx, scope, ids));
   }
   scoped<T>(scope: PiArchiveScope, work: (tx: PiArchiveTransaction) => Promise<T>) {
     const scoped = structuredClone(scope);
     return withProfileTransaction(this.db, scoped, async (tx) =>
-      work({
-        current: async (conversationId, sessionId) => {
-          await tx.execute(
-            sql`select pg_advisory_xact_lock(hashtextextended(${JSON.stringify([scoped.tenantId, scoped.subjectId, conversationId, sessionId])}, 0))`,
-          );
-          const [row] = await tx
-            .select()
-            .from(c.piSessionArchives)
-            .where(
-              and(
-                eq(c.piSessionArchives.tenantId, scoped.tenantId),
-                eq(c.piSessionArchives.subjectId, scoped.subjectId),
-                eq(c.piSessionArchives.conversationId, conversationId),
-                eq(c.piSessionArchives.sessionId, sessionId),
-              ),
-            )
-            .orderBy(desc(c.piSessionArchives.revision))
-            .limit(1);
-          if (!row) return null;
-          // Preserve latest revision for CAS even when its payload was invalidated.
-          return {
-            scope: scoped,
-            conversationId,
-            revision: row.revision,
-            fingerprint: row.fingerprint,
-            dependencies: row.dependencies,
-            archive: row.archive as unknown as PiSessionArchive,
-          };
-        },
-        dependenciesCurrent: async (dependencies) => {
-          for (const dependency of [...dependencies].sort((a, b) =>
-            a.sourceId.localeCompare(b.sourceId),
-          ))
-            if (
-              (await dependencyFingerprint(tx, scoped, dependency.sourceId)) !==
-              dependency.fingerprint
-            )
-              return false;
-          return true;
-        },
-        insertRevision: async (record) => {
-          await tx.insert(c.piSessionArchives).values({
-            ...scoped,
-            conversationId: record.conversationId,
-            sessionId: record.archive.sessionId,
-            revision: record.revision,
-            fingerprint: record.fingerprint,
-            dependencies: record.dependencies,
-            archive: record.archive as unknown as Record<string, unknown>,
-          });
-        },
-      }),
+      work(archiveTransaction(tx, scoped)),
     );
   }
+}
+
+/** Shared SQL adapter used by standalone and already-scoped transactions. */
+function archiveTransaction(tx: ProfileTransaction, scoped: PiArchiveScope): PiArchiveTransaction {
+  return {
+    current: async (conversationId, sessionId) => {
+      await lockPiProfileState(tx, scoped);
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${JSON.stringify([scoped.tenantId, scoped.subjectId, conversationId, sessionId])}, 0))`,
+      );
+      const [row] = await tx
+        .select()
+        .from(c.piSessionArchives)
+        .where(
+          and(
+            eq(c.piSessionArchives.tenantId, scoped.tenantId),
+            eq(c.piSessionArchives.subjectId, scoped.subjectId),
+            eq(c.piSessionArchives.conversationId, conversationId),
+            eq(c.piSessionArchives.sessionId, sessionId),
+          ),
+        )
+        .orderBy(desc(c.piSessionArchives.revision))
+        .limit(1);
+      if (!row) return null;
+      // Preserve latest revision for CAS even when its payload was invalidated.
+      return {
+        scope: scoped,
+        conversationId,
+        revision: row.revision,
+        fingerprint: row.fingerprint,
+        dependencies: row.dependencies,
+        archive: row.archive as unknown as PiSessionArchive,
+      };
+    },
+    dependenciesCurrent: async (dependencies) => {
+      for (const dependency of [...dependencies].sort((a, b) =>
+        a.sourceId.localeCompare(b.sourceId),
+      ))
+        if (
+          (await dependencyFingerprint(tx, scoped, dependency.sourceId)) !== dependency.fingerprint
+        )
+          return false;
+      return true;
+    },
+    insertRevision: async (record) => {
+      await tx.insert(c.piSessionArchives).values({
+        ...scoped,
+        conversationId: record.conversationId,
+        sessionId: record.archive.sessionId,
+        revision: record.revision,
+        fingerprint: record.fingerprint,
+        dependencies: record.dependencies,
+        archive: record.archive as unknown as Record<string, unknown>,
+      });
+    },
+  };
 }
