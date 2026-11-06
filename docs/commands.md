@@ -7,6 +7,7 @@
 - 单节点运行配置：实例上的 `runtime.env`（部署脚本生成）与 `deployment/standalone/compose.yaml`；模型服务配置在数据库 `app_settings`，由运营方在实例上维护，修改后重启应用生效；App 不提供修改入口。
 - 脚本入口与参数：`package.json`、`apps/*/package.json` 和对应 `scripts/` 源码。
 - 本机数据库连接、corpus 路径和访问串：本机忽略配置；仅向需要的进程传递，不输出密钥。
+- 长对话处理状态：`GET /api/core/model-operations/:id`，使用原 Profile 查询已返回的操作 ID；只读轮询不新增模型调用。
 - pi 直接回应运行入口：`apps/api/src/personal-understanding/pi-conversation.ts`；模型出口和实际调用限制由 `pi-provider.ts` 与 `PI_REPLY_LIMITS` 定义，复用数据库模型设置，不另置一套私人 key。方法资源可用 `FINDME_METHODS_ROOT` 指定；默认读取随应用发布的 `resources/personal-understanding`。
 - pi 归档已有库升级：`packages/db/migrations/0001-pi-session-archives.sql`，部署前按既有迁移流程确认执行；它属于数据库变更，不随文档核对自动执行。归档、来源与实际请求记录均为私人数据，不放入仓库或普通日志。
 - 当前部署版本与健康：查询实例上的 `deployed-commit` 与 `/ready`，不从历史文档推定。

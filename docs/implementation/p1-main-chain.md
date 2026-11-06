@@ -20,7 +20,7 @@
 | 处理结果是否可见 | 每次处理返回并持久化 `processing.result`（`revised / challenged / added / supported / unknown`）和逐条 `prior_effects`；允许“不变”或“未知”，但必须说明 |
 | 并发 | 写入前锁定原修订；若它已不是当前有效版本，该效果记为 `skipped_stale`，不覆盖新的有效状态 |
 | 删除 | 硬删除某认识的来源时，其他探索中把它用作上下文的步骤、问题和助手追问（含复制的文字和据此生成的读数），以及该认识的撤回副本都一并清理；这类认识不再进入任何上下文；提交前检查本次用到的认识没有被删除，并与删除串行执行 |
-| 自动处理与费用 | 账号模式自动处理（D26），受两层限制：每次操作最多 4 次模型请求（规划、综合各最多 2 次尝试，账号路由关闭网关自身的单次重试，使上限按实际请求计）；每个 Profile 滚动 24 小时的操作上限 `CORE_MODEL_DAILY_OPERATION_LIMIT`，默认 0 即关闭，且需要 `CLOUD_INFERENCE_ENABLED=1` |
+| 自动处理与费用 | 旧固定探索/综合路径由账号网关关闭自身重试，规划和综合各保留有界尝试。当前 pi `/reply` 的每操作实际请求、输入/输出和费用边界以 `personal-understanding/pi-conversation.ts` 的 `PI_REPLY_LIMITS` 为准，覆盖工具循环中的模型请求。共同保留 Profile 滚动 24 小时操作闸；生产启用与每日上限来自数据库 `app_settings` 的模型配置，经 `standalone/settings.ts` 校验、`cloud-diagnostic/config.ts` 转换，并由 `index.ts` 在启动时注入，不从旧环境变量推定当前配置 |
 | 事务边界 | 账号模式下每次读写各开一个短的 Profile RLS 事务（RLS 即数据库行级权限），模型调用夹在两次事务之间，不在事务内调用；失败操作用原幂等键重新执行时另计一次；计数前按 Profile 取事务级 advisory 锁，避免并发的新请求读到相同已用数而一起越过上限；超限时整次预留回滚，不调用模型，已保存的输入不受影响 |
 
 ## 3. 接口与状态衔接

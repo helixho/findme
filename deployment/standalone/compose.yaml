@@ -17,35 +17,3 @@ services:
       retries: 12
     logging:
       options: {max-size: 10m, max-file: '3'}
-  app:
-    image: findme-local:${FINDME_VERSION:-current}
-    build:
-      context: ../..
-      dockerfile: deployment/standalone/Dockerfile
-      args:
-        FINDME_VERSION: ${FINDME_VERSION:-unknown}
-    init: true
-    restart: unless-stopped
-    stop_grace_period: 2m
-    depends_on:
-      postgres: {condition: service_healthy, required: false}
-    ports:
-      - '${FINDME_BIND:-0.0.0.0}:${FINDME_PORT:-8000}:8000'
-    volumes:
-      - ${FINDME_STATE_DIR}/files:/data/files
-    environment:
-      DATABASE_URL_RUNTIME: postgresql://findme_runtime_login:${DB_RUNTIME_PASSWORD}@${DATABASE_LOCATION:-postgres/findme}
-      DATABASE_URL_IDENTITY: postgresql://findme_identity_login:${DB_IDENTITY_PASSWORD}@${DATABASE_LOCATION:-postgres/findme}
-      DATABASE_URL_AUTH: postgresql://findme_auth_login:${DB_AUTH_PASSWORD}@${DATABASE_LOCATION:-postgres/findme}
-      ACCOUNT_BASE_URL: ${FINDME_PUBLIC_URL}
-      ACCOUNT_TRUSTED_ORIGINS: ${FINDME_PUBLIC_URL}
-      ACCOUNT_SECRET: ${ACCOUNT_SECRET}
-      ACCOUNT_REGISTRATION_ENABLED: '0'
-    healthcheck:
-      test: [CMD, node, -e, 'fetch("http://127.0.0.1:8000/ready").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))']
-      interval: 30s
-      timeout: 10s
-      retries: 4
-      start_period: 30s
-    logging:
-      options: {max-size: 10m, max-file: '3'}

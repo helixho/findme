@@ -6,7 +6,7 @@
 
 ## 1. Core 已实现行为
 
-- 目标客户端为 `apps/app`，支持单次探索、恢复与来源纠正。访问使用单用户 Bearer 鉴权；App 可用单次、可过期的 bootstrap 换取访问串并清除 fragment，保存在当前浏览器 localStorage。入口实现见 `apps/app/src/api.ts` 与 Core bootstrap 路由；这不等于多租户隔离已经实现。
+- 客户端为 `apps/app`，支持持续对话、探索恢复与来源纠正。实例无登录入口，`auth/owner.ts` 为每个请求解析同一个内部 owner；不依赖 Bearer、bootstrap 访问串或浏览器 cookie session。Profile 的数据归属和请求作用域仍由服务端核对。
 
 - `@findme/core` 与 Core schema 独立承载来源、事件、探索、认识和修订；operation 支持幂等，step 支持决策血缘，source link 区分输入补充、更正与时间更新。物理定义见 `packages/db/src/schema-core.ts`。
 - Start/Respond/Correct/Continue/Complete/SourceAssessment/Amend mutation 均走请求幂等。Start 与 Respond 先在短事务内可靠保存用户原始输入，不等待 LLM；Continue 现在固定经过 `Deterministic Gate → Semantic Planner → Deterministic Validator`：版本化策略统一执行问题预算、hard cap 与 force-deeper 边界；模型只负责关键 uncertainty/有限表述；validator 拒绝重复问题、绕过确定性 gate 的 Ask 和已知明显范围越界，重试仍不合格则安全 Stop。Stop 时才执行一次 Final Synthesis。Correct 仍在事务外生成、短事务发布，并以 `expected_version`/current revision 防止过期结果覆盖。
@@ -20,7 +20,7 @@
 
 ## 2. 运行方式
 
-唯一运行方式是单节点：一个 Node 进程提供网页、API 和后台执行器，账号模式是唯一登录方式，数据库为任意 PostgreSQL（默认同节点容器）。旧的静态/会话/私有模式、旧版速记/洞察/问卷/素材接口、旧任务队列及其数据表，以及 Cloudflare Worker 与 Neon 专用读取已从源码移除。表结构只有一份当前定义 [schema.sql](../packages/db/schema.sql)，仅在空库时建表；账号角色与行级策略见 [account-runtime.sql](../packages/db/access/account-runtime.sql)。模型服务商、密钥与预算是存在数据库 `app_settings` 中的应用设置，在 App 中修改并即时生效。登录身份的签发者固定为 `findme-account`，与实例网址无关。
+唯一运行方式是单节点：一个 Node 进程提供网页、API 和后台执行器，账号模式是唯一登录方式，数据库为任意 PostgreSQL（默认同节点容器）。旧的静态/会话/私有模式、旧版速记/洞察/问卷/素材接口、旧任务队列及其数据表，以及 Cloudflare Worker 与 Neon 专用读取已从源码移除。表结构的当前定义为 [schema.sql](../packages/db/schema.sql)，空库据此建表，已有库执行 `packages/db/migrations/` 中尚未执行的升级；账号角色与行级策略见 [account-runtime.sql](../packages/db/access/account-runtime.sql)。模型服务商、密钥与预算存于数据库 `app_settings`，结构与默认值由 `standalone/settings.ts` 定义；`index.ts` 启动时读取，修改后须重启应用才能生效，App 不提供修改入口。登录身份的签发者固定为 `findme-account`，与实例网址无关。
 
 ## 4. AV 本人小批内测（独立 staging）
 
@@ -122,7 +122,7 @@ AV 加工归档两表（`av_processed_batches`、`av_processed_chunks`）保留�
 
 ## 13. C2–C4 账号云端运行代码
 
-账号模式通过 `auth/server.ts` 的 Better Auth/pg 具体服务、`auth/account.ts` 服务端 session 校验与 `auth/profiles.ts` 多 Profile 管理接入。默认注册关闭，需配置实际邮件发送回调才可启用；客户端 account 模式在同一 `apps/app` 使用 cookie session、Profile选择、登录/注销/密码重置，不沿用固定 owner 或静态Bearer。
+当前实例通过 `auth/owner.ts` 的 `loadOwnerId` 读取唯一内部账号，`ownerSessions` 为所有请求提供该 owner 身份；`index.ts` 注入这一身份服务。App 无注册、登录、注销、密码重置或 Profile 切换界面，也不使用登录 cookie 或静态 Bearer。`auth/profiles.ts` 保留多 Profile 数据管理与服务端作用域核对，测试资料可经 API 独立创建；数据库中的账号仅承担数据归属。
 
 `schema-auth.ts`、`schema-platform.ts`、`schema-diagnostic.ts` 与 `cloud-diagnostic/scope.ts` 分别承接账号凭据、Profile/任务/调用/导入/生命周期、报告/证据/原档及事务作用域。运行/identity/auth 数据库角色分离，scope入口拒绝特权或不正确角色。完整Core子表策略和角色授权在单独的 `access/account-runtime.sql`，每次部署幂等应用。
 
@@ -195,6 +195,7 @@ Core 来源评估和账号来源排除/恢复/重绑共用 `core/source-invalida
 - `POST /api/core/claim-revisions/:id/withdraw` 按本人要求停用一条当前认识，不调用模型，先锁对话再锁认识并原子递增对话版本；之后不进入回答、当前认识和首页，并作为不得作为前提的项目提供给模型。
 - 探索停止追问或结束后，`/messages` 保存续聊消息并重新打开会话。普通新信息不再自动调用 `/continue`；显式更新认识、纠正和停用保留。
 - `index.ts` 在模型配置含 key 时创建 `piReply`，注入账号 `/reply`；`personal-understanding/pi-conversation.ts` 使用完整 AgentSession SDK，恢复有效归档，以当前会话和历史原文为主，通过 `pi-read-tools.ts` 提供原文检索、会话/来源展开和方法读取。旧网关回应保留作未注入 pi 的兼容路径，不能据此声称生产入口仍固定一次生成。
+- 长请求可返回 HTTP 202，保留同一个已预留操作继续执行；`GET /api/core/model-operations/:id` 按当前 Profile 只读查询状态。App 自动轮询，失败不自动发起新的收费重试；请求及 lease 时限以账号路由、pi provider 和记录回调代码为准。
 - `pi-provider.ts` 只连接明确的 OpenRouter 出口；实际请求经过原有 Profile 每日操作闸及每操作的请求、输入、输出、费用和报价上限，禁用服务商重试。具体限额唯一来源为 `pi-conversation.ts` 的 `PI_REPLY_LIMITS`，报价上限不是实际单价。自动压缩尚未启用，上下文超限明确失败，原文仍保存。
 - `pi-archive.ts` 将 pi 会话归档为数据库来源，保留每次实际 pi 上下文、provider payload、可见输出及工具往返。最终归档与回复在同一事务提交；失败检查点标为未完成，下次重建。仅完成且 `contextVersion` 相符、依赖仍有效的归档用于恢复。归档结构及已有库升级脚本分别见 `packages/db/src/schema-core.ts`、`packages/db/migrations/0001-pi-session-archives.sql`。
 - 来源失效传播同时清理相关 pi 归档、派生回复与幂等缓存。该代码路径不代表实例已升级或真实模型下的连续交流效果已通过，真实验证仍需在 Instabox 隔离测试资料中执行。

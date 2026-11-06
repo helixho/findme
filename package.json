@@ -15,7 +15,7 @@
     "test": "node scripts/test.mjs all",
     "test:local": "node scripts/test.mjs local",
     "test:db": "node scripts/test.mjs db",
-    "test:runner": "node --test scripts/test-runner.test.mjs",
+    "test:runner": "node --test scripts/test-runner.test.mjs scripts/native-runtime.test.mjs",
     "av:layers": "pnpm --filter @findme/api av:layers",
     "av:layers:view": "pnpm --filter @findme/api av:layers:view",
     "diagnostic:reason": "pnpm --filter @findme/api diagnostic:reason",

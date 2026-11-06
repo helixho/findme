@@ -92,7 +92,7 @@ const content = await (await request(`/api/blobs/${saved.blob}/content`)).text()
 assert.equal(content, saved.text);
 assert.equal(createHash("sha256").update(content).digest("hex"), saved.hash);
 console.log(
-  "[verification] real HTTPS login, scoped writes, file round-trip and persisted content passed",
+  "[verification] real HTTPS owner access, scoped writes, file round-trip and persisted content passed",
 );
 
 if (process.env.FINDME_BROWSER_CDP) {
@@ -123,7 +123,7 @@ if (process.env.FINDME_BROWSER_CDP) {
         });
       await context.close();
     }
-    console.log("[verification] real desktop/mobile browser login, refresh and layout passed");
+    console.log("[verification] real desktop/mobile browser owner access, refresh and layout passed");
   } finally {
     await browser.close();
   }

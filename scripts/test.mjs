@@ -47,7 +47,7 @@ try {
     });
   if (mode !== "db" && mode !== "app") {
     console.log("[runner] Node script unit tests (DB-free)");
-    await run(process.execPath, ["--test", "scripts/test-runner.test.mjs"], {
+    await run(process.execPath, ["--test", "scripts/test-runner.test.mjs", "scripts/native-runtime.test.mjs"], {
       cwd: root,
       env,
       signal: controller.signal,
