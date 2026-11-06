@@ -6,10 +6,7 @@ REF=${FINDME_REF:-main}
 if [[ -d /data/workspace ]]; then DEFAULT_CHECKOUT=/data/workspace/findme;
 else DEFAULT_CHECKOUT=${HOME:?}/workspace/findme; fi
 CHECKOUT=${FINDME_CHECKOUT:-$DEFAULT_CHECKOUT}
-if ! command -v git >/dev/null; then
-  if ((EUID == 0)); then apt-get update && apt-get install -y git;
-  else sudo apt-get update && sudo apt-get install -y git; fi
-fi
+command -v git >/dev/null || { echo 'Git is required; install it before deployment.' >&2; exit 1; }
 NEW_CHECKOUT=0
 if [[ ! -d $CHECKOUT/.git ]]; then
   [[ ! -e $CHECKOUT ]] || { echo "Checkout path already exists: $CHECKOUT" >&2; exit 1; }
