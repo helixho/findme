@@ -155,7 +155,7 @@ export function createPiReadTools(
   const tools = [
     make(
       "search_history",
-      "按关键词搜索当前资料内的历史原文；未命中不代表不存在，可改词后重试。",
+      "按关键词搜索当前资料内的历史原文；零命中或仅命中当前会话时，额外返回最多10条其他会话近期本人原文作为 recent_fallback 候选，并非关键词匹配或已相关的证据。逐条判断相关性，必要时展开问答和纠正，不将近期出现当成支持。",
       { query: { type: "string" } },
       ["query"],
       async (input) => {
@@ -165,33 +165,59 @@ export function createPiReadTools(
           12,
         );
         return withProfileTransaction(db, ctx, async (tx) => {
-          const rows = await tx
-            .select({ id: c.sourceItems.id })
-            .from(c.sourceItems)
-            .innerJoin(
-              c.sourceAssessments,
-              and(
-                eq(c.sourceAssessments.sourceItemId, c.sourceItems.id),
-                eq(c.sourceAssessments.isCurrent, true),
-              ),
-            )
-            .where(
-              and(
-                eq(c.sourceItems.tenantId, ctx.tenantId),
-                eq(c.sourceItems.subjectId, ctx.subjectId),
-                eq(c.sourceItems.usageStatus, "active"),
-                sql`${c.sourceAssessments.eligibility} in ('eligible','context_only')`,
-                ...terms.map((term) => sql`position(${term} in lower(${c.sourceItems.content}))>0`),
-                options.withheldSourceIds?.length
-                  ? notInArray(c.sourceItems.id, options.withheldSourceIds)
-                  : undefined,
-                options.currentMessageId
-                  ? sql`${c.sourceItems.id} <> ${options.currentMessageId}`
-                  : undefined,
-              ),
-            )
-            .orderBy(desc(c.sourceItems.capturedAt), desc(c.sourceItems.id))
-            .limit(10);
+          const findRows = (matchTerms: boolean, onlySubject: boolean) =>
+            tx
+              .select({
+                id: c.sourceItems.id,
+                conversationId: sql<string | null>`${c.sourceItems.sourceMeta}->>'exploration_id'`,
+              })
+              .from(c.sourceItems)
+              .innerJoin(
+                c.sourceAssessments,
+                and(
+                  eq(c.sourceAssessments.sourceItemId, c.sourceItems.id),
+                  eq(c.sourceAssessments.isCurrent, true),
+                ),
+              )
+              .where(
+                and(
+                  eq(c.sourceItems.tenantId, ctx.tenantId),
+                  eq(c.sourceItems.subjectId, ctx.subjectId),
+                  eq(c.sourceItems.usageStatus, "active"),
+                  sql`${c.sourceAssessments.eligibility} in ('eligible','context_only')`,
+                  ...(matchTerms
+                    ? terms.map(
+                        (term) => sql`position(${term} in lower(${c.sourceItems.content}))>0`,
+                      )
+                    : []),
+                  onlySubject ? eq(c.sourceItems.authorKind, "subject") : undefined,
+                  onlySubject && options.currentConversationId
+                    ? sql`coalesce(${c.sourceItems.sourceMeta}->>'exploration_id', '') <> ${options.currentConversationId}`
+                    : undefined,
+                  options.withheldSourceIds?.length
+                    ? notInArray(c.sourceItems.id, options.withheldSourceIds)
+                    : undefined,
+                  options.currentMessageId
+                    ? sql`${c.sourceItems.id} <> ${options.currentMessageId}`
+                    : undefined,
+                ),
+              )
+              .orderBy(desc(c.sourceItems.capturedAt), desc(c.sourceItems.id))
+              .limit(10);
+          const keywordRows = await findRows(true, false);
+          const onlyCurrentConversation =
+            !!options.currentConversationId &&
+            keywordRows.length > 0 &&
+            keywordRows.every((row) => row.conversationId === options.currentConversationId);
+          const recentRows =
+            !keywordRows.length || onlyCurrentConversation ? await findRows(false, true) : [];
+          const rows = [...keywordRows, ...recentRows];
+          const fallbackIds = new Set(recentRows.map((row) => row.id));
+          const retrievalKind = !keywordRows.length
+            ? "recent_fallback"
+            : onlyCurrentConversation
+              ? "keyword_with_recent_fallback"
+              : "keyword_match";
           const deps = rows.length
             ? await capturePiDependencies(
                 tx,
@@ -210,6 +236,9 @@ export function createPiReadTools(
             if (source)
               result.push({
                 id: source.id,
+                retrieval_kind: fallbackIds.has(source.id) ? "recent_fallback" : "keyword_match",
+                current_conversation:
+                  source.sourceMeta?.exploration_id === options.currentConversationId,
                 excerpt:
                   source.authorKind === "assistant"
                     ? questionBackground(source.content).slice(0, 1000) || null
@@ -220,7 +249,18 @@ export function createPiReadTools(
               });
           }
           collect(deps);
-          return { items: result, exhaustive: false };
+          return {
+            items: result,
+            retrieval_kind: retrievalKind,
+            query,
+            keyword_match_count: keywordRows.length,
+            recent_fallback_count: recentRows.length,
+            exhaustive: false,
+            relevance_instruction:
+              retrievalKind !== "keyword_match"
+                ? "关键词零命中或只命中当前会话；recent_fallback 仅为其他会话的近期本人原文候选，不是匹配结果。当前会话的重复问题不能算独立历史证据。须逐条判断与当前问题的关系，不能据此声称已发现跨场景模式或证据充分；不相关时说明未找到。"
+                : "关键词匹配不等于语义支持，仍须核对表达归属、情境和后续纠正。",
+          };
         });
       },
     ),

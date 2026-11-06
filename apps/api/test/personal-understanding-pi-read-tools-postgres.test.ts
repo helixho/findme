@@ -85,3 +85,136 @@ it("collects exact source dependencies and rejects excluded or cross-profile rea
     await Promise.all([db.sql.end(), identity.sql.end()]);
   }
 });
+
+it("offers bounded recent subject originals only on zero keyword hits and keeps scope and exclusions", async () => {
+  const cfg = JSON.parse(await readFile(process.env.FINDME_ACCOUNT_VERIFY_CONFIG!, "utf8"));
+  const db = createDb(cfg.runtime_url);
+  const identity = createDb(cfg.identity_url);
+  try {
+    const profiles = new ProfileService(identity.db);
+    const ctx = await profiles.resolve({ provider: "pi-fallback-test", principalId: randomUUID() });
+    const other = await profiles.resolve({
+      provider: "pi-fallback-test",
+      principalId: randomUUID(),
+    });
+    const insert = async (
+      scope: typeof ctx,
+      name: string,
+      n: number,
+      author = "subject",
+      status = "active",
+      eligibility = "eligible",
+    ) =>
+      withProfileTransaction(db.db, scope, async (tx) => {
+        const [source] = await tx
+          .insert(c.sourceItems)
+          .values({
+            ...scope,
+            sourceKind: "native_event",
+            authorKind: author,
+            content: name,
+            usageStatus: status,
+            capturedAt: new Date(1700000000000 + n * 1000),
+          })
+          .returning();
+        if (!source) throw Error("missing source");
+        await tx.insert(c.sourceAssessments).values({
+          sourceItemId: source.id,
+          version: 1,
+          attributionStatus: author === "subject" ? "confirmed_subject" : "not_subject",
+          contextCompleteness: "partial",
+          temporalPrecision: "unknown",
+          eligibility,
+          rationale: "synthetic",
+        });
+        return source.id;
+      });
+    const allowed: string[] = [];
+    for (let i = 0; i < 12; i++)
+      allowed.push(
+        await insert(
+          ctx,
+          `RECENT_ORIGINAL_${i}`,
+          i,
+          "subject",
+          "active",
+          i === 11 ? "context_only" : "eligible",
+        ),
+      );
+    const current = await insert(ctx, "CURRENT_MESSAGE", 20);
+    const future = await insert(ctx, "FUTURE_MESSAGE", 21);
+    const excluded = await insert(ctx, "EXCLUDED_ORIGINAL", 22, "subject", "excluded");
+    const assistant = await insert(ctx, "ASSISTANT_INTERPRETATION", 23, "assistant");
+    const ineligible = await insert(
+      ctx,
+      "INELIGIBLE_ORIGINAL",
+      24,
+      "subject",
+      "active",
+      "needs_review",
+    );
+    const foreign = await insert(other, "FOREIGN_ORIGINAL", 25);
+    const conversationId = randomUUID();
+    const selfMatch = await insert(ctx, "ONLY_CURRENT_KEYWORD", 26);
+    await withProfileTransaction(db.db, ctx, async (tx) => {
+      for (const id of [current, future, selfMatch])
+        await tx
+          .update(c.sourceItems)
+          .set({ sourceMeta: { exploration_id: conversationId } })
+          .where(eq(c.sourceItems.id, id));
+    });
+    const toolset = createPiReadTools(db.db, ctx, [], {
+      currentConversationId: conversationId,
+      currentMessageId: current,
+      withheldSourceIds: [future],
+    });
+    const search = toolset.tools.find((tool) => tool.name === "search_history");
+    if (!search) throw Error("missing search");
+    const call = async (query: string) => {
+      const result = await (
+        search.execute as unknown as (
+          id: string,
+          input: unknown,
+        ) => Promise<{ content: Array<{ text: string }> }>
+      )("fallback", { query });
+      return JSON.parse(result.content[0]?.text || "{}");
+    };
+    const result = await call("UNSEEN_QUERY_NO_KEYWORD_HIT");
+    expect(result.retrieval_kind).toBe("recent_fallback");
+    expect(result.relevance_instruction).toContain("不是匹配结果");
+    expect(result.items).toHaveLength(10);
+    const ids = result.items.map((item: { id: string }) => item.id);
+    expect(ids.every((id: string) => allowed.includes(id))).toBe(true);
+    expect(ids).toContain(allowed[11]);
+    for (const id of [current, future, excluded, assistant, ineligible, foreign])
+      expect(ids).not.toContain(id);
+    expect(
+      toolset
+        .dependencies()
+        .map((dep) => dep.sourceId)
+        .sort(),
+    ).toEqual([...ids].sort());
+    const selfOnly = await call("ONLY_CURRENT_KEYWORD");
+    expect(selfOnly.retrieval_kind).toBe("keyword_with_recent_fallback");
+    expect(selfOnly.keyword_match_count).toBe(1);
+    expect(selfOnly.recent_fallback_count).toBe(10);
+    const keywordItem = selfOnly.items.find((item: { id: string }) => item.id === selfMatch);
+    expect(keywordItem.retrieval_kind).toBe("keyword_match");
+    expect(keywordItem.current_conversation).toBe(true);
+    const fallbackItems = selfOnly.items.filter(
+      (item: { retrieval_kind: string }) => item.retrieval_kind === "recent_fallback",
+    );
+    expect(
+      fallbackItems.every(
+        (item: { id: string; author: string }) =>
+          allowed.includes(item.id) && item.author === "subject",
+      ),
+    ).toBe(true);
+    expect(selfOnly.relevance_instruction).toContain("重复问题不能算独立历史证据");
+    const match = await call("RECENT_ORIGINAL_0");
+    expect(match.retrieval_kind).toBe("keyword_match");
+    expect(match.items.map((item: { id: string }) => item.id)).toEqual([allowed[0]]);
+  } finally {
+    await Promise.all([db.sql.end(), identity.sql.end()]);
+  }
+});
