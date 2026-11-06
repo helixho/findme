@@ -1,6 +1,6 @@
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { type Db, coreSchema as c } from "@findme/db";
-import { and, desc, eq, notInArray, sql } from "drizzle-orm";
+import { and, desc, eq, lte, notInArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { withProfileTransaction } from "../cloud-diagnostic/scope.js";
 import type { PersonalContext } from "../core/exploration-types.js";
@@ -20,8 +20,12 @@ export function createPiReadTools(
     currentMessageId?: string;
     currentConversationId?: string;
     withheldSourceIds?: string[];
+    asOf?: string;
   } = {},
 ): { tools: ToolDefinition[]; dependencies: () => PiArchiveDependency[] } {
+  const asOf = options.asOf
+    ? new Date(z.string().datetime({ offset: true }).parse(options.asOf))
+    : undefined;
   const dependencies = new Map(seed.map((d) => [d.sourceId, d.fingerprint]));
   const collect = (items: readonly PiArchiveDependency[]) => {
     for (const item of items) {
@@ -43,6 +47,7 @@ export function createPiReadTools(
             eq(c.sourceItems.id, id),
             eq(c.sourceItems.tenantId, ctx.tenantId),
             eq(c.sourceItems.subjectId, ctx.subjectId),
+            asOf ? lte(c.sourceItems.capturedAt, asOf) : undefined,
           ),
         )
         .limit(1);
@@ -66,6 +71,13 @@ export function createPiReadTools(
               eq(c.sourceItems.tenantId, ctx.tenantId),
               eq(c.sourceItems.subjectId, ctx.subjectId),
               eq(c.sourceItems.usageStatus, "active"),
+              asOf ? lte(c.sourceItems.capturedAt, asOf) : undefined,
+              options.withheldSourceIds?.length
+                ? notInArray(c.sourceItems.id, options.withheldSourceIds)
+                : undefined,
+              options.currentMessageId
+                ? sql`${c.sourceItems.id} <> ${options.currentMessageId}`
+                : undefined,
               sql`${c.sourceAssessments.eligibility} in ('eligible','context_only')`,
               sql`${c.sourceItems.sourceMeta}->>'namespace'=${namespace}`,
               sql`case when (${c.sourceItems.sourceMeta}->>'sequence') ~ '^[0-9]+$' then (${c.sourceItems.sourceMeta}->>'sequence')::integer between ${Math.max(0, sequence - 2)} and ${sequence + 2} else false end`,
@@ -152,128 +164,151 @@ export function createPiReadTools(
       details: {},
     }),
   });
+  const discover = async (query?: string) =>
+    withProfileTransaction(db, ctx, async (tx) => {
+      const terms = query
+        ? [...new Set(query.toLocaleLowerCase().split(/\s+/).filter(Boolean))].slice(0, 12)
+        : [];
+      const rows = await tx
+        .select({ id: c.sourceItems.id })
+        .from(c.sourceItems)
+        .innerJoin(
+          c.sourceAssessments,
+          and(
+            eq(c.sourceAssessments.sourceItemId, c.sourceItems.id),
+            eq(c.sourceAssessments.isCurrent, true),
+          ),
+        )
+        .where(
+          and(
+            eq(c.sourceItems.tenantId, ctx.tenantId),
+            eq(c.sourceItems.subjectId, ctx.subjectId),
+            eq(c.sourceItems.usageStatus, "active"),
+            sql`${c.sourceAssessments.eligibility} in ('eligible','context_only')`,
+            query ? undefined : eq(c.sourceItems.authorKind, "subject"),
+            !query && options.currentConversationId
+              ? sql`coalesce(${c.sourceItems.sourceMeta}->>'exploration_id','') <> ${options.currentConversationId}`
+              : undefined,
+            ...terms.map((term) => sql`position(${term} in lower(${c.sourceItems.content}))>0`),
+            asOf ? lte(c.sourceItems.capturedAt, asOf) : undefined,
+            options.withheldSourceIds?.length
+              ? notInArray(c.sourceItems.id, options.withheldSourceIds)
+              : undefined,
+            options.currentMessageId
+              ? sql`${c.sourceItems.id} <> ${options.currentMessageId}`
+              : undefined,
+          ),
+        )
+        .orderBy(desc(c.sourceItems.capturedAt), desc(c.sourceItems.id))
+        .limit(query ? 10 : 100);
+      const deps = rows.length
+        ? await capturePiDependencies(
+            tx,
+            ctx,
+            rows.map((row) => row.id),
+          )
+        : [];
+      const items = [];
+      const groups = new Set<string>();
+      const selected = new Set<string>();
+      for (const row of rows) {
+        const [source] = await tx
+          .select()
+          .from(c.sourceItems)
+          .where(eq(c.sourceItems.id, row.id))
+          .limit(1);
+        if (!source || (asOf && source.capturedAt > asOf)) continue;
+        const conversationId =
+          typeof source.sourceMeta?.exploration_id === "string"
+            ? source.sourceMeta.exploration_id
+            : null;
+        const namespace =
+          typeof source.sourceMeta?.namespace === "string" ? source.sourceMeta.namespace : null;
+        const group = conversationId ?? namespace ?? source.id;
+        if (!query && groups.has(group)) continue;
+        groups.add(group);
+        selected.add(source.id);
+        const expression =
+          source.authorKind === "assistant" ? questionBackground(source.content) : source.content;
+        items.push({
+          id: source.id,
+          source_id: source.id,
+          conversation_id: conversationId,
+          namespace,
+          title: expression.slice(0, 80) || "原问题背景需展开查看",
+          recorded_at: source.capturedAt.toISOString(),
+          author: source.authorKind,
+          stage: "discovery_only",
+          current_conversation:
+            !!options.currentConversationId && conversationId === options.currentConversationId,
+        });
+        if (items.length === 10) break;
+      }
+      collect(deps.filter((dep) => selected.has(dep.sourceId)));
+      return {
+        items,
+        stage: "discovery_only",
+        retrieval_kind: query ? "keyword_match" : "conversation_clues",
+        query: query ?? null,
+        content_as_of: options.asOf ?? null,
+        exhaustive: false,
+        relevance_instruction:
+          "这些是定位线索，不是已采用的证据。需要原文时按需展开并说明用途和与当前问题的关系；找不到相关材料时可以说明未找到。线索相邻、近期或关键词相同都不能证明相关或同一机制。",
+      };
+    });
+  const UseDeclaration = z.object({
+    intended_use: z.enum(["fact_context", "analogy", "counterexample"]),
+    relation: z.string().trim().min(1).max(600),
+  });
+  const useProperties = {
+    intended_use: {
+      type: "string",
+      enum: ["fact_context", "analogy", "counterexample"],
+      description: "本次展开预期用途：事实背景、类比或反例",
+    },
+    relation: {
+      type: "string",
+      description: "说明这段材料与当前问题的具体关系；此声明仍须复核，不证明相关性",
+    },
+  };
+  const declared = <T>(value: T, input: z.infer<typeof UseDeclaration>) => ({
+    ...value,
+    use_declaration: { ...input, status: "proposed_not_verified" },
+    adoption_instruction:
+      "原文被读取不等于已支持当前结论。只按声明用途核对；类比不是本人事实或共同机制的证明。一般建议可独立给出，不以无关经历包装为个性化依据。",
+  });
   const tools = [
     make(
       "search_history",
-      "按关键词搜索当前资料内的历史原文；零命中或仅命中当前会话时，额外返回最多10条其他会话近期本人原文作为 recent_fallback 候选，并非关键词匹配或已相关的证据。逐条判断相关性，必要时展开问答和纠正，不将近期出现当成支持。",
+      "按关键词查找当前资料内的历史定位线索；零命中就是零命中，不自动混入近期原文。需要找回旧会话时可另用discover_conversations，再判断是否值得展开。",
       { query: { type: "string" } },
       ["query"],
       async (input) => {
         const { query } = z.object({ query: z.string().trim().min(1).max(240) }).parse(input);
-        const terms = [...new Set(query.toLocaleLowerCase().split(/\s+/).filter(Boolean))].slice(
-          0,
-          12,
-        );
-        return withProfileTransaction(db, ctx, async (tx) => {
-          const findRows = (matchTerms: boolean, onlySubject: boolean) =>
-            tx
-              .select({
-                id: c.sourceItems.id,
-                conversationId: sql<string | null>`${c.sourceItems.sourceMeta}->>'exploration_id'`,
-              })
-              .from(c.sourceItems)
-              .innerJoin(
-                c.sourceAssessments,
-                and(
-                  eq(c.sourceAssessments.sourceItemId, c.sourceItems.id),
-                  eq(c.sourceAssessments.isCurrent, true),
-                ),
-              )
-              .where(
-                and(
-                  eq(c.sourceItems.tenantId, ctx.tenantId),
-                  eq(c.sourceItems.subjectId, ctx.subjectId),
-                  eq(c.sourceItems.usageStatus, "active"),
-                  sql`${c.sourceAssessments.eligibility} in ('eligible','context_only')`,
-                  ...(matchTerms
-                    ? terms.map(
-                        (term) => sql`position(${term} in lower(${c.sourceItems.content}))>0`,
-                      )
-                    : []),
-                  onlySubject ? eq(c.sourceItems.authorKind, "subject") : undefined,
-                  onlySubject && options.currentConversationId
-                    ? sql`coalesce(${c.sourceItems.sourceMeta}->>'exploration_id', '') <> ${options.currentConversationId}`
-                    : undefined,
-                  options.withheldSourceIds?.length
-                    ? notInArray(c.sourceItems.id, options.withheldSourceIds)
-                    : undefined,
-                  options.currentMessageId
-                    ? sql`${c.sourceItems.id} <> ${options.currentMessageId}`
-                    : undefined,
-                ),
-              )
-              .orderBy(desc(c.sourceItems.capturedAt), desc(c.sourceItems.id))
-              .limit(10);
-          const keywordRows = await findRows(true, false);
-          const onlyCurrentConversation =
-            !!options.currentConversationId &&
-            keywordRows.length > 0 &&
-            keywordRows.every((row) => row.conversationId === options.currentConversationId);
-          const recentRows =
-            !keywordRows.length || onlyCurrentConversation ? await findRows(false, true) : [];
-          const rows = [...keywordRows, ...recentRows];
-          const fallbackIds = new Set(recentRows.map((row) => row.id));
-          const retrievalKind = !keywordRows.length
-            ? "recent_fallback"
-            : onlyCurrentConversation
-              ? "keyword_with_recent_fallback"
-              : "keyword_match";
-          const deps = rows.length
-            ? await capturePiDependencies(
-                tx,
-                ctx,
-                rows.map((row) => row.id),
-              )
-            : [];
-          // Read after dependency locks, not before, so text and fingerprint are one version.
-          const result = [];
-          for (const row of rows) {
-            const [source] = await tx
-              .select()
-              .from(c.sourceItems)
-              .where(eq(c.sourceItems.id, row.id))
-              .limit(1);
-            if (source)
-              result.push({
-                id: source.id,
-                retrieval_kind: fallbackIds.has(source.id) ? "recent_fallback" : "keyword_match",
-                current_conversation:
-                  source.sourceMeta?.exploration_id === options.currentConversationId,
-                excerpt:
-                  source.authorKind === "assistant"
-                    ? questionBackground(source.content).slice(0, 1000) || null
-                    : source.content.slice(0, 1000),
-                author: source.authorKind,
-                conversation_id: source.sourceMeta?.exploration_id ?? null,
-                namespace: source.sourceMeta?.namespace ?? null,
-              });
-          }
-          collect(deps);
-          return {
-            items: result,
-            retrieval_kind: retrievalKind,
-            query,
-            keyword_match_count: keywordRows.length,
-            recent_fallback_count: recentRows.length,
-            exhaustive: false,
-            relevance_instruction:
-              retrievalKind !== "keyword_match"
-                ? "关键词零命中或只命中当前会话；recent_fallback 仅为其他会话的近期本人原文候选，不是匹配结果。当前会话的重复问题不能算独立历史证据。须逐条判断与当前问题的关系，不能据此声称已发现跨场景模式或证据充分；不相关时说明未找到。"
-                : "关键词匹配不等于语义支持，仍须核对表达归属、情境和后续纠正。",
-          };
-        });
+        return discover(query);
       },
+    ),
+    make(
+      "discover_conversations",
+      "按需找回其他会话的有界线索：只返回来自合格本人原文的短标题、时间和编号，不返回正文，不声称相关。用于用户提及旧讨论但关键词无法定位时；可以找不到相关会话。",
+      {},
+      [],
+      async () => discover(),
     ),
     make(
       "read_source",
       "读取来源的完整原文和表达归属；助手原文仅作对话背景。",
-      { id: { type: "string" }, include_analysis: { type: "boolean" } },
-      ["id"],
+      { id: { type: "string" }, include_analysis: { type: "boolean" }, ...useProperties },
+      ["id", "intended_use", "relation"],
       async (input) => {
         const args = z
           .object({ id: z.string().uuid(), include_analysis: z.boolean().optional() })
+          .merge(UseDeclaration)
           .parse(input);
-        return read(args.id, args.include_analysis ?? false);
+        return declared(
+          await read(args.id, args.include_analysis ?? false),
+          UseDeclaration.parse(args),
+        );
       },
     ),
     make(
@@ -283,12 +318,13 @@ export function createPiReadTools(
         id: { type: "string" },
         cursor: { type: "integer", minimum: 0 },
         limit: { type: "integer", minimum: 1, maximum: 30 },
+        ...useProperties,
         include_analysis: {
           type: "boolean",
           description: "仅当用户要求复核旧助手判断时启用；默认只读本人表达和必要问答背景。",
         },
       },
-      ["id"],
+      ["id", "intended_use", "relation"],
       async (input) => {
         const args = z
           .object({
@@ -297,8 +333,10 @@ export function createPiReadTools(
             cursor: z.number().int().nonnegative().optional(),
             limit: z.number().int().min(1).max(30).optional(),
           })
+          .merge(UseDeclaration)
           .parse(input);
         const result = await new NativeConversationReader(db).read(ctx, {
+          asOf: options.asOf,
           conversationId: args.id,
           beforeSourceId:
             args.id === options.currentConversationId ? options.currentMessageId : undefined,
@@ -307,7 +345,7 @@ export function createPiReadTools(
           limit: args.limit,
         });
         collect(result.dependencies);
-        return result;
+        return declared(result, UseDeclaration.parse(args));
       },
     ),
   ];

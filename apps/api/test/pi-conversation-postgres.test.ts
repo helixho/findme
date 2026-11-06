@@ -22,9 +22,16 @@ import type { PersonalContext } from "../src/core/exploration-types.js";
 import type { CoreGateway } from "../src/core/llm.js";
 import { onError } from "../src/middleware/error.js";
 import {
+  PiArchiveRepository,
+  SqlPiArchiveDatabase,
+  piArchiveFingerprint,
+} from "../src/personal-understanding/pi-archive.js";
+import {
   PI_REPLY_LIMITS,
   createPiReplyHandler,
+  decodePiReview,
 } from "../src/personal-understanding/pi-conversation.js";
+import type { PiSessionArchive } from "../src/personal-understanding/pi-runtime.js";
 import { accountCoreModelRoutes } from "../src/routes/account-core-model.js";
 
 const final = (reply: string) =>
@@ -63,10 +70,24 @@ function responses(
   const remaining = [...steps];
   const dispatch: FauxResponseFactory = async (context, controls, state, model) => {
     const payload = reviewPayload(context);
-    if (payload)
+    if (payload) {
+      const reply = review ? review(payload.candidate_reply) : payload.candidate_reply;
       return fauxAssistantMessage(
-        review ? review(payload.candidate_reply) : payload.candidate_reply,
+        JSON.stringify({
+          reply,
+          decisions:
+            reply === payload.candidate_reply
+              ? []
+              : [
+                  {
+                    statement: payload.candidate_reply,
+                    action: "narrow",
+                    reason: "仅保留本人原话支持的范围。",
+                  },
+                ],
+        }),
       );
+    }
     const step = remaining.shift();
     if (!step) throw new Error("unscripted primary response");
     return typeof step === "function" ? step(context, controls, state, model) : step;
@@ -375,9 +396,16 @@ it("propagates A source exclusion through B conversation reads into C archives a
     const b = await conversation(f.db, f.ctx, "查看A的历史原因");
     const bKey = randomUUID();
     responses(f, [
-      fauxAssistantMessage(fauxToolCall("read_source", { id: a.sourceId }, { id: "read-a" }), {
-        stopReason: "toolUse",
-      }),
+      fauxAssistantMessage(
+        fauxToolCall(
+          "read_source",
+          { id: a.sourceId, intended_use: "fact_context", relation: "核对所问历史原因的原话" },
+          { id: "read-a" },
+        ),
+        {
+          stopReason: "toolUse",
+        },
+      ),
       final("B_PRIVATE_DERIVATION：周日休息"),
     ]);
     expect((await request(f, b, bKey)).status).toBe(201);
@@ -387,7 +415,11 @@ it("propagates A source exclusion through B conversation reads into C archives a
     let defaultExpanded = "";
     responses(f, [
       fauxAssistantMessage(
-        fauxToolCall("read_conversation", { id: b.id }, { id: "read-b-default" }),
+        fauxToolCall(
+          "read_conversation",
+          { id: b.id, intended_use: "fact_context", relation: "查看所问B会话的原始背景" },
+          { id: "read-b-default" },
+        ),
         {
           stopReason: "toolUse",
         },
@@ -397,7 +429,12 @@ it("propagates A source exclusion through B conversation reads into C archives a
         return fauxAssistantMessage(
           fauxToolCall(
             "read_conversation",
-            { id: b.id, include_analysis: true },
+            {
+              id: b.id,
+              include_analysis: true,
+              intended_use: "counterexample",
+              relation: "核对B曾作的判断，不把它当本人事实",
+            },
             { id: "read-b-analysis" },
           ),
           { stopReason: "toolUse" },
@@ -522,9 +559,16 @@ it("does not deadlock or publish old evidence when exclusion overlaps a pi final
     const a = await conversation(f.db, f.ctx, "INTERLEAVED_PRIVATE_REASON");
     const b = await conversation(f.db, f.ctx, "查历史再回答");
     responses(f, [
-      fauxAssistantMessage(fauxToolCall("read_source", { id: a.sourceId }, { id: "read-race" }), {
-        stopReason: "toolUse",
-      }),
+      fauxAssistantMessage(
+        fauxToolCall(
+          "read_source",
+          { id: a.sourceId, intended_use: "fact_context", relation: "核对所问历史原因的原话" },
+          { id: "read-race" },
+        ),
+        {
+          stopReason: "toolUse",
+        },
+      ),
       async () => {
         atFinal.resolve();
         await returnFinal.promise;
@@ -653,11 +697,22 @@ it("delivers the evidence-reviewed wording and resumes without the unsupported p
     const accepted = await first.json();
     expect(accepted.reply).toContain("只是报名");
     expect(accepted.reply).not.toContain("已经付费");
+    expect(accepted).not.toHaveProperty("decisions");
+    const traces = await withProfileTransaction(f.db, f.ctx, (tx) =>
+      tx.select().from(c.piRequestRecords).where(eq(c.piRequestRecords.conversationId, thread.id)),
+    );
+    const audit = traces
+      .map((trace) => JSON.stringify(trace.output))
+      .find((text) => text.includes("decisions"));
+    expect(audit).toContain("仅保留本人原话支持的范围");
+    expect(audit).toContain("narrow");
     const next = await nextMessage(f, thread.id, accepted.version, "那接着聊吧。");
     let restoredContext = "";
     responses(f, [
       (context) => {
-        restoredContext = JSON.stringify(context);
+        restoredContext = JSON.stringify(
+          context.messages.filter((message) => message.role !== "system"),
+        );
         return final("我们接着讨论报名这件事。");
       },
     ]);
@@ -665,6 +720,8 @@ it("delivers the evidence-reviewed wording and resumes without the unsupported p
     expect(restoredContext).toContain("只是报名");
     expect(restoredContext).not.toContain("你已经付费");
     expect(restoredContext).not.toContain("说明你已投入实际成本");
+    expect(restoredContext).not.toContain("decisions");
+    expect(restoredContext).not.toContain("仅保留本人原话支持的范围");
   } finally {
     await f.close();
   }
@@ -775,6 +832,171 @@ it("unwraps stored pi reply envelopes on rebuild without rewriting the stored tu
     );
     expect(stored.some((t) => t.role === "assistant" && t.content === envelope)).toBe(true);
     expect(stored.some((t) => t.role === "user" && t.content === envelope)).toBe(true);
+  } finally {
+    await f.close();
+  }
+});
+
+it("requires review changes to have bounded dispositions tied to the draft", () => {
+  expect(decodePiReview(JSON.stringify({ reply: "原回应", decisions: [] }), "原回应").reply).toBe(
+    "原回应",
+  );
+  expect(
+    decodePiReview(
+      JSON.stringify({
+        reply: "候选解释",
+        decisions: [{ statement: "原回应", action: "narrow", reason: "仅有候选支持。" }],
+      }),
+      "**原回应**",
+    ).decisions,
+  ).toHaveLength(1);
+  expect(() => decodePiReview("修订后回应", "原回应")).toThrow("PI_REPLY_FORMAT_INVALID");
+  expect(() => decodePiReview(JSON.stringify({ reply: "修订", decisions: [] }), "原回应")).toThrow(
+    "PI_REPLY_FORMAT_INVALID",
+  );
+  expect(() =>
+    decodePiReview(
+      JSON.stringify({
+        reply: "修订",
+        decisions: [{ statement: "不存在的原句", action: "remove", reason: "无据" }],
+      }),
+      "原回应",
+    ),
+  ).toThrow("PI_REPLY_FORMAT_INVALID");
+  expect(
+    decodePiReview(
+      JSON.stringify({
+        reply: "有限候选",
+        decisions: [
+          { statement: "原回应", action: "narrow", reason: "能作候选，不能判为更可能。" },
+        ],
+      }),
+      "原回应",
+    ).decisions[0]?.action,
+  ).toBe("narrow");
+});
+
+it("does not publish an unauditable review and leaves the saved input pending", async () => {
+  const f = await fixture();
+  try {
+    const thread = await conversation(f.db, f.ctx, "合成事件：请比较几种解释。");
+    const steps: FauxResponseFactory = (context) =>
+      reviewPayload(context)
+        ? fauxAssistantMessage(JSON.stringify({ reply: "擅自改写但没有理由", decisions: [] }))
+        : fauxAssistantMessage("有边界的候选观察。");
+    f.provider.setResponses([steps, steps]);
+    const response = await request(f, thread);
+    expect(response.status).toBe(502);
+    const { getExplorationView } = await import("../src/core/exploration-views.js");
+    const view = await withProfileTransaction(f.db, f.ctx, (tx) =>
+      getExplorationView(tx as never, f.ctx, thread.id),
+    );
+    expect(view.turns.filter((turn) => turn.role === "assistant")).toHaveLength(0);
+    expect(view.pending.messages.some((message) => message.source_id === thread.sourceId)).toBe(
+      true,
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+it("rebuilds a valid old-policy archive instead of replaying its unqualified tool context", async () => {
+  const f = await fixture();
+  try {
+    await conversation(f.db, f.ctx, "合成旧工具资料：范围只适用于某次任务。");
+    const thread = await conversation(f.db, f.ctx, "请查合成旧工具资料。");
+    responses(f, [
+      fauxAssistantMessage(
+        fauxToolCall("search_history", { query: "合成旧工具资料" }, { id: "old-policy-search" }),
+        { stopReason: "toolUse" },
+      ),
+      final("已按原话说明范围。"),
+    ]);
+    const first = await request(f, thread);
+    expect(first.status).toBe(201);
+    const accepted = await first.json();
+    await withProfileTransaction(f.db, f.ctx, async (tx) => {
+      const rows = await tx
+        .select()
+        .from(c.piSessionArchives)
+        .where(eq(c.piSessionArchives.conversationId, thread.id));
+      const row = rows.sort((a, b) => b.revision - a.revision)[0];
+      if (!row?.archive) throw new Error("expected archived conversation");
+      const archive = structuredClone(row.archive) as PiSessionArchive & { contextPolicy?: string };
+      delete archive.contextPolicy;
+      const toolEntry = archive.entries.find(
+        (entry) => entry.type === "message" && entry.message.role === "toolResult",
+      );
+      if (!toolEntry || toolEntry.type !== "message" || toolEntry.message.role !== "toolResult")
+        throw new Error("expected tool context");
+      toolEntry.message.content.push({ type: "text", text: "OLD_POLICY_ARCHIVE_ONLY_MARKER" });
+      await tx
+        .update(c.piSessionArchives)
+        .set({ archive, fingerprint: piArchiveFingerprint(archive, row.dependencies) })
+        .where(eq(c.piSessionArchives.id, row.id));
+      const restored = await new PiArchiveRepository(
+        SqlPiArchiveDatabase.forTransaction(tx, f.ctx),
+      ).restore(f.ctx, thread.id, archive.sessionId);
+      expect(restored?.status).toBe("available");
+    });
+    const next = await nextMessage(f, thread.id, accepted.version, "继续说这件事。");
+    let actualInput = "";
+    responses(f, [
+      (context) => {
+        actualInput = JSON.stringify(context);
+        return final("继续按已交付记录讨论。");
+      },
+    ]);
+    expect((await request(f, next)).status).toBe(201);
+    expect(actualInput).toContain("已按原话说明范围");
+    expect(actualInput).not.toContain("OLD_POLICY_ARCHIVE_ONLY_MARKER");
+  } finally {
+    await f.close();
+  }
+});
+
+it("applies the target-message time boundary to tool reads from another conversation", async () => {
+  const f = await fixture();
+  try {
+    const thread = await conversation(f.db, f.ctx, "请按当时已有材料回答。");
+    const future = await conversation(
+      f.db,
+      f.ctx,
+      "CROSS_CONVERSATION_FUTURE_CONTENT_MUST_NOT_LEAK",
+    );
+    await withProfileTransaction(f.db, f.ctx, async (tx) => {
+      const [target] = await tx
+        .select()
+        .from(c.sourceItems)
+        .where(eq(c.sourceItems.id, thread.sourceId));
+      if (!target) throw new Error("missing target");
+      await tx
+        .update(c.sourceItems)
+        .set({ capturedAt: new Date(target.capturedAt.getTime() + 60_000) })
+        .where(eq(c.sourceItems.id, future.sourceId));
+    });
+    let actualInput = "";
+    responses(f, [
+      fauxAssistantMessage(
+        fauxToolCall(
+          "read_source",
+          {
+            id: future.sourceId,
+            intended_use: "fact_context",
+            relation: "检查指定记录是否在当时已存在。",
+          },
+          { id: "future-source" },
+        ),
+        { stopReason: "toolUse" },
+      ),
+      (context) => {
+        actualInput = JSON.stringify(context);
+        return final("当时没有可使用的相关材料。");
+      },
+    ]);
+    expect((await request(f, thread)).status).toBe(201);
+    expect(actualInput).not.toContain("CROSS_CONVERSATION_FUTURE_CONTENT_MUST_NOT_LEAK");
+    expect(actualInput).toContain("SOURCE_NOT_AVAILABLE");
   } finally {
     await f.close();
   }

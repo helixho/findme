@@ -154,27 +154,23 @@ it("reads complete native messages, preserves short-answer context and withholds
         })
         .returning();
       if (!independent) throw new Error("fixture");
-      await tx
-        .insert(c.sourceAssessments)
-        .values({
-          sourceItemId: independent.id,
-          version: 1,
-          attributionStatus: "confirmed_subject",
-          contextCompleteness: "sufficient",
-          temporalPrecision: "unknown",
-          eligibility: "eligible",
-          rationale: "synthetic",
-        });
-      await tx
-        .insert(c.explorationTurns)
-        .values({
-          explorationId: conversationId,
-          sourceItemId: independent.id,
-          role: "user",
-          turnKind: "message",
-          content: independent.content,
-          createdAt: new Date(4000),
-        });
+      await tx.insert(c.sourceAssessments).values({
+        sourceItemId: independent.id,
+        version: 1,
+        attributionStatus: "confirmed_subject",
+        contextCompleteness: "sufficient",
+        temporalPrecision: "unknown",
+        eligibility: "eligible",
+        rationale: "synthetic",
+      });
+      await tx.insert(c.explorationTurns).values({
+        explorationId: conversationId,
+        sourceItemId: independent.id,
+        role: "user",
+        turnKind: "message",
+        content: independent.content,
+        createdAt: new Date(4000),
+      });
       const [reply] = await tx
         .insert(c.explorationTurns)
         .values({
@@ -203,6 +199,107 @@ it("reads complete native messages, preserves short-answer context and withholds
     expect(hidden.assistant_context_withheld).toBe(true);
     expect(hidden.turns[0]!.content).toBeNull();
     expect((await reader.read(ctx, { conversationId, cursor: 1 })).turns[0]!.content).toBeNull();
+  } finally {
+    await Promise.all([runtime.sql.end(), identity.sql.end()]);
+  }
+});
+
+it("cuts cross-conversation bodies and question background off at asOf but checks present source status", async () => {
+  const cfg = JSON.parse(await readFile(process.env.FINDME_ACCOUNT_VERIFY_CONFIG!, "utf8"));
+  const runtime = createDb(cfg.runtime_url);
+  const identity = createDb(cfg.identity_url);
+  try {
+    const ctx = await new ProfileService(identity.db).resolve({
+      provider: "native-asof",
+      principalId: randomUUID(),
+    });
+    const base = 1700000000000;
+    const fixture = await withProfileTransaction(runtime.db, ctx, async (tx) => {
+      const [experience] = await tx
+        .insert(c.experiences)
+        .values({ ...ctx, summary: "MUTABLE_FUTURE_SUMMARY" })
+        .returning();
+      const [conversation] = await tx
+        .insert(c.explorations)
+        .values({ ...ctx, experienceId: experience!.id })
+        .returning();
+      if (!conversation) throw Error("fixture");
+      const add = async (text: string, captured: number, posted: number) => {
+        const [source] = await tx
+          .insert(c.sourceItems)
+          .values({
+            ...ctx,
+            sourceKind: "native_event",
+            authorKind: "subject",
+            content: text,
+            capturedAt: new Date(base + captured),
+            sourceMeta: { exploration_id: conversation.id },
+          })
+          .returning();
+        if (!source) throw Error("fixture");
+        await tx.insert(c.sourceAssessments).values({
+          sourceItemId: source.id,
+          version: 1,
+          attributionStatus: "confirmed_subject",
+          contextCompleteness: "sufficient",
+          temporalPrecision: "unknown",
+          eligibility: "eligible",
+          rationale: "synthetic",
+        });
+        await tx.insert(c.explorationTurns).values({
+          explorationId: conversation.id,
+          sourceItemId: source.id,
+          role: "user",
+          turnKind: "message",
+          content: text,
+          createdAt: new Date(base + posted),
+        });
+        return source.id;
+      };
+      const early = await add("EARLY_ALLOWED_ORIGINAL", 1000, 1000);
+      await tx.insert(c.explorationTurns).values({
+        explorationId: conversation.id,
+        role: "assistant",
+        turnKind: "reply",
+        content: "EARLY_BACKGROUND。你选哪个？\nA. 前者\nB. 后者",
+        createdAt: new Date(base + 1500),
+      });
+      await add("FUTURE_SOURCE_AND_TURN", 3000, 3000);
+      await add("FUTURE_CAPTURE_BACKDATED_TURN", 3000, 1200);
+      await add("FUTURE_TURN_EARLY_CAPTURE", 1000, 3500);
+      await tx.insert(c.explorationTurns).values({
+        explorationId: conversation.id,
+        role: "assistant",
+        turnKind: "reply",
+        content: "FUTURE_ASSISTANT_QUESTION？",
+        createdAt: new Date(base + 4000),
+      });
+      return { conversationId: conversation.id, early };
+    });
+    const reader = new NativeConversationReader(runtime.db);
+    const input = {
+      conversationId: fixture.conversationId,
+      asOf: new Date(base + 2000).toISOString(),
+      includeAnalysis: true,
+    };
+    const result = await reader.read(ctx, input);
+    expect(result.turns).toHaveLength(2);
+    expect(result.turns[0]?.content).toBe("EARLY_ALLOWED_ORIGINAL");
+    expect(JSON.stringify(result)).not.toContain("FUTURE_");
+    expect(result.dependencies.map((d) => d.sourceId)).toEqual([fixture.early]);
+    const page = await reader.read(ctx, { ...input, includeAnalysis: false, cursor: 1, limit: 1 });
+    expect(page.turns[0]?.content).toContain("你选哪个？");
+    expect(page.next_cursor).toBeNull();
+    await withProfileTransaction(runtime.db, ctx, (tx) =>
+      tx
+        .update(c.sourceItems)
+        .set({ usageStatus: "excluded" })
+        .where(eq(c.sourceItems.id, fixture.early)),
+    );
+    const nowExcluded = await reader.read(ctx, input);
+    expect(nowExcluded.turns[0]?.content).toBeNull();
+    expect(JSON.stringify(nowExcluded)).not.toContain("EARLY_ALLOWED_ORIGINAL");
+    expect(nowExcluded.turns[1]?.content).toBeNull();
   } finally {
     await Promise.all([runtime.sql.end(), identity.sql.end()]);
   }

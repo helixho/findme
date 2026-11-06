@@ -1,5 +1,5 @@
 import { type Db, coreSchema as c } from "@findme/db";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, lte, or } from "drizzle-orm";
 import { z } from "zod";
 import { withProfileTransaction } from "../cloud-diagnostic/scope.js";
 import { orderConversationReplies } from "../core/conversation-context.js";
@@ -10,6 +10,7 @@ import { capturePiReplyLineage } from "./pi-lineage.js";
 const Input = z.object({
   conversationId: z.string().uuid(),
   beforeSourceId: z.string().uuid().optional(),
+  asOf: z.string().datetime({ offset: true }).optional(),
   includeAnalysis: z.boolean().default(false),
   cursor: z.number().int().nonnegative().default(0),
   limit: z.number().int().min(1).max(30).default(10),
@@ -80,7 +81,18 @@ export class NativeConversationReader {
             eq(c.sourceAssessments.isCurrent, true),
           ),
         )
-        .where(eq(c.explorationTurns.explorationId, conversation.id))
+        .where(
+          and(
+            eq(c.explorationTurns.explorationId, conversation.id),
+            input.asOf ? lte(c.explorationTurns.createdAt, new Date(input.asOf)) : undefined,
+            input.asOf
+              ? or(
+                  isNull(c.explorationTurns.sourceItemId),
+                  lte(c.sourceItems.capturedAt, new Date(input.asOf)),
+                )
+              : undefined,
+          ),
+        )
         .orderBy(asc(c.explorationTurns.createdAt), asc(c.explorationTurns.id));
       const orderedMetadata = orderConversationReplies(
         rawMetadata.map((row) => ({ ...row, id: row.turnId })),
@@ -178,6 +190,8 @@ export class NativeConversationReader {
 
       return {
         conversation_id: conversation.id,
+        content_as_of: input.asOf ?? null,
+        qualification_checked_at: "current",
         preceding_question_background: precedingQuestion,
         history_instruction:
           "旧问题和选项仅用于理解已发生的回答，不是本轮待办；未答不等于必须追问。",
