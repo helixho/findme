@@ -77,6 +77,7 @@ async function more(page: Page, name: string) {
   await page.getByRole("button", { name, exact: true }).click();
 }
 async function correct(page: Page) {
+  await page.getByRole("button", { name: "专题阅读", exact: true }).click();
   await page.getByRole("button", { name: /合成专题/ }).click();
   await page.getByRole("button", { name: "纠正与补充", exact: true }).click();
 }
@@ -150,6 +151,7 @@ test("source inventory loads page beyond fifty and preserves earlier sources", a
   await expect(page.getByText("合成来源第1条", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "更多来源", exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "FindMe 首页" }).click();
+  await page.getByRole("button", { name: "专题阅读", exact: true }).click();
   await page.getByRole("button", { name: /合成专题/ }).click();
   await page.getByRole("button", { name: "修订记录", exact: true }).click();
   await page.getByText("继续处理与历史材料", { exact: true }).click();
@@ -273,6 +275,7 @@ test("invalid current report never renders cached conclusions", async ({ page })
     }
     return false;
   });
+  await page.getByRole("button", { name: "专题阅读", exact: true }).click();
   await page.getByRole("button", { name: /合成专题/ }).click();
   await expect(page.getByRole("heading", { name: "当前没有可读的已审核报告" })).toBeVisible();
   await expect(page.getByText("不应显示的旧结论")).toHaveCount(0);
@@ -386,12 +389,13 @@ test("conversation saves input, shows the processing outcome and the narrowed pr
     return false;
   });
   await page.getByRole("button", { name: "对话" }).click();
-  await expect(page.getByText(/当前理解中有 1 条有效认识/)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "今天，想从哪里说起？" })).toBeVisible();
   await page.getByLabel("说说一件具体的事").fill("合成经历：熟人讨论我会直接说。");
   await page.getByRole("button", { name: "保存并继续" }).click();
   // Limit reached: the input is reported as saved and can be processed again.
   await expect(page.getByText(/已保存。最近 24 小时的自动处理次数已用完/)).toBeVisible();
   await page.getByRole("button", { name: "重新处理" }).click();
+  await page.locator(".conversation-insights summary").click();
   await expect(page.getByText("这次输入修订了已有认识")).toBeVisible();
   await expect(page.getByText("收窄了适用范围")).toBeVisible();
   await expect(page.getByText("适用范围：仅限有上级在场的正式评审会。")).toBeVisible();
@@ -495,6 +499,7 @@ test("conversation retries a still-processing run with the same request identity
   await expect(page.getByRole("button", { name: "刷新状态" })).toBeVisible();
   expect(continues).toHaveLength(1);
   await page.getByRole("button", { name: "重新处理" }).click();
+  await page.locator(".conversation-insights summary").click();
   await expect(page.getByText("合成完成的认识。")).toBeVisible();
   expect(continues).toHaveLength(2);
   expect(continues[1]).toBe(continues[0]);
@@ -554,6 +559,7 @@ test("a failed continue can refresh a completed result without another model req
   await page.getByRole("button", { name: "保存并继续" }).click();
   await expect(page.getByText(/暂时无法确认处理结果/)).toBeVisible();
   await page.getByRole("button", { name: "刷新状态" }).click();
+  await page.locator(".conversation-insights summary").click();
   await expect(page.getByText("已经完成的综合结果。")).toBeVisible();
   await expect(page.locator(".conversation-thread .thread-user")).toHaveText(
     "我：这段经历已经保存。",
@@ -661,6 +667,7 @@ test("correcting one claim keeps the other claims of the result", async ({ page 
   await page.getByRole("button", { name: "对话" }).click();
   await page.getByLabel("说说一件具体的事").fill("合成经历。");
   await page.getByRole("button", { name: "保存并继续" }).click();
+  await page.locator(".conversation-insights summary").click();
   await expect(page.getByText("第二条合成认识。")).toBeVisible();
   await page.getByRole("button", { name: "纠正这条" }).first().click();
   await page.getByLabel("说明").fill("只在部分情境成立。");
@@ -783,6 +790,7 @@ test("a correction still being processed is not reported as done", async ({ page
   await page.getByRole("button", { name: "对话" }).click();
   await page.getByLabel("说说一件具体的事").fill("合成经历。");
   await page.getByRole("button", { name: "保存并继续" }).click();
+  await page.locator(".conversation-insights summary").click();
   await page.getByRole("button", { name: "纠正这条" }).click();
   await page.getByLabel("说明").fill("只在部分情境成立。");
   await page.getByRole("button", { name: "保存纠正" }).click();
@@ -967,7 +975,8 @@ for (const delivery of ["direct", "direct-no-update", "queued", "queued-switch"]
     await expect(page.getByText("合成回应：接住进展。")).toBeVisible();
     await expect(page.getByLabel("接着说")).toBeEnabled();
     await expect(page.getByText("这次进展改变了什么？")).toHaveCount(0);
-    await expect(page.getByText("可以继续聊；需要时，也可以根据这段对话更新认识。")).toBeVisible();
+    await expect(page.getByText("目前没有形成认识。")).toHaveCount(0);
+    await page.locator(".conversation-tools summary").click();
     expect(continued).toBe(0);
     expect(replyPosts).toBe(1);
     if (deferred) expect(polls).toBe(2);
@@ -1042,4 +1051,70 @@ test("a first message whose reply failed is retried as a reply, not as explorati
   await page.getByRole("button", { name: "重新处理" }).click();
   await expect.poll(() => calls).toContain("reply");
   expect(calls).not.toContain("continue");
+});
+
+test("home keeps new chat available alongside active and completed conversations", async ({
+  page,
+}) => {
+  const opened: string[] = [];
+  await setup(page, async (route, path) => {
+    if (path === "/api/core/understanding") {
+      await json(route, { state: "empty", claims: [], needs_review: [] });
+      return true;
+    }
+    if (path === "/api/core/understanding/changes") {
+      await json(route, { items: [] });
+      return true;
+    }
+    if (path === "/api/core/explorations") {
+      await json(route, {
+        items: [
+          {
+            id: "active-home",
+            summary: "商量周末安排",
+            status: "active",
+            version: 1,
+            phase: "review",
+            last_activity_at: "2026-11-06T09:00:00Z",
+            open_question: { question: "不该被作为欠账展示的问题" },
+          },
+          {
+            id: "completed-home",
+            summary: "回看上次合作",
+            status: "completed",
+            version: 2,
+            phase: "completed",
+            last_activity_at: "2026-11-05T09:00:00Z",
+          },
+        ],
+      });
+      return true;
+    }
+    if (path === "/api/core/explorations/completed-home") {
+      opened.push(path);
+      await json(route, {
+        exploration: { id: "completed-home", status: "completed", version: 2 },
+        experience: { id: "x-home", summary: "回看上次合作" },
+        turns: [],
+        claims: [],
+        gaps: [],
+        phase: "completed",
+        pending: { messages: [], corrections: [], understanding_updates: [] },
+      });
+      return true;
+    }
+    if (path === "/api/core/model-status") {
+      await json(route, { enabled: true, operation_limit: 20, operations_used: 0 });
+      return true;
+    }
+    return false;
+  });
+  await expect(page.getByRole("heading", { name: "今天，想从哪里说起？" })).toBeVisible();
+  await expect(page.getByLabel("聊件新的", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /商量周末安排/ })).toBeVisible();
+  await expect(page.getByText("不该被作为欠账展示的问题")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /回看上次合作/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /合成专题/ })).not.toBeVisible();
+  await page.getByRole("button", { name: /回看上次合作/ }).click();
+  await expect.poll(() => opened.length).toBe(1);
 });

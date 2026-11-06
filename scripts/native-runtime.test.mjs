@@ -331,3 +331,86 @@ test("activation restart failure restores the existing service and release point
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("same-commit redeploy checks readiness without rebuilding the active release", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "findme-release-current-"));
+  try {
+    const { execFileSync } = await import("node:child_process");
+    const { symlink, chmod, readFile, readlink } = await import("node:fs/promises");
+    const repo = path.join(root, "source");
+    const state = path.join(root, "state");
+    const bin = path.join(root, "bin");
+    const checks = path.join(root, "checks");
+    await mkdir(path.join(repo, "scripts"), { recursive: true });
+    await mkdir(bin);
+    await mkdir(state);
+    await writeFile(
+      path.join(repo, "scripts/install-deploy.sh"),
+      await readFile(path.resolve("scripts/install-deploy.sh")),
+    );
+    execFileSync("git", ["init", "-q", repo]);
+    execFileSync("git", ["-C", repo, "add", "."]);
+    execFileSync("git", [
+      "-C",
+      repo,
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.test",
+      "commit",
+      "-qm",
+      "fixture",
+    ]);
+    const commit = execFileSync("git", ["-C", repo, "rev-parse", "HEAD"], {
+      encoding: "utf8",
+    }).trim();
+    const active = path.join(state, "releases", commit);
+    await mkdir(active, { recursive: true });
+    await writeFile(path.join(active, "served.html"), "existing-content");
+    await symlink(active, path.join(state, "current"));
+    await writeFile(path.join(state, "deployed-commit"), `${commit}\n`);
+    await writeFile(
+      path.join(state, "runtime.env"),
+      "FINDME_PORT=8000\nFINDME_PUBLIC_URL=https://example.test\nDATABASE_LOCATION=db.example.test/findme\n",
+    );
+    for (const [name, body] of Object.entries({
+      node: '#!/bin/sh\nif [ "$1" = --input-type=module ]; then printf "%s\\n%s\\n" "$FINDME_CHECK_PORT" "$3" >> "$TEST_CHECKS"; exit "$TEST_READY_EXIT"; fi\nexit 0\n',
+      pnpm: "#!/bin/sh\necho unexpected-build >&2\nexit 23\n",
+      systemctl:
+        '#!/bin/sh\nif [ "$1" = is-active ]; then exit 0; fi\necho unexpected-service-change >&2\nexit 24\n',
+      sudo: '#!/bin/sh\nexec "$@"\n',
+    })) {
+      await writeFile(path.join(bin, name), body);
+      await chmod(path.join(bin, name), 0o755);
+    }
+    const args = [
+      path.join(repo, "scripts/install-deploy.sh"),
+      "--state-dir",
+      state,
+      "--no-publish",
+    ];
+    const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, TEST_CHECKS: checks };
+    for (const ready of [true, false]) {
+      let failure;
+      try {
+        execFileSync("bash", args, {
+          env: { ...env, TEST_READY_EXIT: ready ? "0" : "37" },
+          stdio: "pipe",
+        });
+      } catch (error) {
+        failure = error;
+      }
+      assert.equal(failure?.status, ready ? undefined : 1);
+      if (!ready) assert.match(String(failure.stderr), /running but not ready/);
+      assert.equal(await readFile(path.join(active, "served.html"), "utf8"), "existing-content");
+      assert.equal(await readFile(path.join(state, "deployed-commit"), "utf8"), `${commit}\n`);
+      assert.equal(await readlink(path.join(state, "current")), active);
+    }
+    const captured = await readFile(checks, "utf8");
+    assert.equal((captured.match(/^8000$/gm) ?? []).length, 2);
+    assert.equal((captured.match(/"\/ready"/g) ?? []).length, 2);
+    assert.match(captured, /"\/health\?strict=1"/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

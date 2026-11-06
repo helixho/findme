@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { CloudApiError, cloudMutation, cloudRequest, isProcessingReply } from "../cloud-api";
 import type {
   ClaimView,
@@ -101,7 +103,15 @@ function explain(error: unknown) {
   return message(error);
 }
 
-export function ConversationView({ resumeId }: { resumeId?: string | null } = {}) {
+export function ConversationView({
+  resumeId,
+  initialMessage,
+  onInitialMessageConsumed,
+}: {
+  resumeId?: string | null;
+  initialMessage?: string;
+  onInitialMessageConsumed?: () => void;
+} = {}) {
   const [status, setStatus] = useState<CoreModelStatus | null>(null);
   const [current, setCurrent] = useState<CurrentUnderstandingResponse | null>(null);
   const [open, setOpen] = useState<ExplorationSummary[]>([]);
@@ -121,12 +131,20 @@ export function ConversationView({ resumeId }: { resumeId?: string | null } = {}
   const [notice, setNotice] = useState("");
   // The saved conversation of the open matter, shown whatever the analysis
   // step is (asking, processing, failed or done).
+  const [optimistic, setOptimistic] = useState("");
+  const [replying, setReplying] = useState<string | null>(null);
+  const initialSent = useRef<string | null>(null);
   const [thread, setThread] = useState<ExplorationView | null>(null);
   // Any new action or unmount invalidates pending reads from the previous view.
   const viewGeneration = useRef(0);
   function compose() {
     viewGeneration.current++;
     setStep({ kind: "compose" });
+    setThread(null);
+    setNotice("");
+    setError("");
+    setOptimistic("");
+    setReplying(null);
   }
 
   const refresh = useCallback(async () => {
@@ -146,17 +164,20 @@ export function ConversationView({ resumeId }: { resumeId?: string | null } = {}
   }, []);
 
   async function run(fn: () => Promise<void>) {
-    viewGeneration.current++;
+    const generation = ++viewGeneration.current;
     setBusy(true);
     setError("");
     setNotice("");
     try {
       await fn();
     } catch (e) {
-      setError(explain(e));
+      if (generation === viewGeneration.current) setError(explain(e));
     } finally {
-      setBusy(false);
-      void refresh().catch(() => undefined);
+      if (generation === viewGeneration.current) {
+        setBusy(false);
+        setOptimistic("");
+        void refresh().catch(() => undefined);
+      }
     }
   }
 
@@ -276,6 +297,7 @@ export function ConversationView({ resumeId }: { resumeId?: string | null } = {}
         if (operation.status !== "processing") {
           await resume(id, false, generation);
           if (generation !== viewGeneration.current) return;
+          setReplying(null);
           setNotice(
             operation.status === "completed"
               ? "回应已生成。"
@@ -285,17 +307,27 @@ export function ConversationView({ resumeId }: { resumeId?: string | null } = {}
         }
         await new Promise((resolve) => setTimeout(resolve, 1000));
       }
-      if (generation === viewGeneration.current)
-        setNotice("消息已保存，回应等待时间较长。请刷新状态确认结果后再重试。");
+      if (generation === viewGeneration.current) {
+        setReplying(null);
+        setNotice(
+          "消息已保存，回应等待时间较长。可以重新打开这段对话确认结果；重试会沿用同一请求。",
+        );
+      }
     } catch (e) {
-      if (generation === viewGeneration.current)
-        setNotice(`消息已保存，暂时无法读取处理状态。请刷新确认。${explain(e)}`);
+      if (generation === viewGeneration.current) {
+        setReplying(null);
+        setNotice(
+          `消息已保存，暂时无法读取处理状态。重新打开对话可确认结果，也可沿用同一请求重试。${explain(e)}`,
+        );
+      }
     }
   }
 
   /** Ordinary chat only replies; understanding is updated on explicit request. */
   async function respond(id: string, version: number, sourceId: string) {
     const generation = viewGeneration.current;
+    setReplying(sourceId);
+    setNotice("回应正在生成，完成后会自动显示。");
     try {
       const reply = await cloudMutation<Reply | { status: "processing"; operation_id: string }>(
         `/api/core/explorations/${id}/reply`,
@@ -310,10 +342,11 @@ export function ConversationView({ resumeId }: { resumeId?: string | null } = {}
       }
       await resume(id, false);
       if (generation !== viewGeneration.current) return;
-      if (reply.new_information)
-        setNotice("新信息已保存在对话里。需要时可以单独更新认识，也可以继续聊。");
+      setReplying(null);
+      setNotice("");
     } catch (e) {
       if (generation !== viewGeneration.current) return;
+      setReplying(null);
       setNotice(`消息已保存。${explain(e)}`);
       return resume(id, false);
     }
@@ -338,6 +371,49 @@ export function ConversationView({ resumeId }: { resumeId?: string | null } = {}
     }
   }
 
+  async function startMessage(text: string) {
+    setOptimistic(text);
+    await run(async () => {
+      const generation = viewGeneration.current;
+      const started = await cloudMutation<StartResponse>("/api/core/explorations", {
+        event: text,
+        reply_first: true,
+      });
+      if (generation !== viewGeneration.current) return;
+      setEvent("");
+      onInitialMessageConsumed?.();
+      setStep({
+        kind: "saved",
+        id: started.exploration.id,
+        version: started.exploration.version,
+        note: "正在回应。",
+      });
+      await attachView(started.exploration.id);
+      if (generation !== viewGeneration.current) return;
+      setOptimistic("");
+      if (started.event_source_id)
+        await respond(started.exploration.id, started.exploration.version, started.event_source_id);
+      else await proceed(started.exploration.id, started.exploration.version);
+    });
+    setOptimistic("");
+  }
+
+  // The home composer already submitted this text; save it once on entry.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: protect the submitted value across rerenders.
+  useEffect(() => {
+    if (!initialMessage?.trim()) return;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled || initialSent.current === initialMessage) return;
+      initialSent.current = initialMessage;
+      setEvent(initialMessage);
+      void startMessage(initialMessage.trim());
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [initialMessage]);
+
   const usedCount =
     step.kind === "ask" || step.kind === "done"
       ? (step.data.prior_understanding?.used.length ?? 0)
@@ -345,35 +421,72 @@ export function ConversationView({ resumeId }: { resumeId?: string | null } = {}
 
   return (
     <section className="home-section conversation-view" aria-labelledby="conversation-title">
-      <h2 id="conversation-title">对话与新经历</h2>
-      <p className="muted">
-        {current?.claims.length
-          ? `当前理解中有 ${current.claims.length} 条有效认识；新的交流会使用其中相关的部分，并说明这次输入带来了什么变化。`
-          : "还没有已形成的认识。可以从一件具体的事开始，不需要先整理成结论。"}
-      </p>
+      <header className="conversation-heading">
+        <div>
+          <span className="fm-meta">FINDME · 日常商量</span>
+          <h2 id="conversation-title">
+            {step.kind === "compose"
+              ? "今天，想从哪里说起？"
+              : thread?.experience?.summary.slice(0, 80) || "接着聊"}
+          </h2>
+        </div>
+        {step.kind !== "compose" && (
+          <button type="button" className="button secondary" disabled={busy} onClick={compose}>
+            聊件新的
+          </button>
+        )}
+      </header>
       {status && !status.enabled && (
-        <output className="form-error">
-          自动处理尚未启用：输入可以保存，但暂时不会形成新的认识或回应。
-        </output>
-      )}
-      {status?.enabled && (
-        <output className="muted">
-          最近 {status.window_hours} 小时已自动处理 {status.operations_used}/
-          {status.operation_limit} 次。
-        </output>
+        <output className="form-error">自动处理尚未启用：输入可以保存，但暂时不会生成回应。</output>
       )}
       {error && (
         <p className="form-error" role="alert">
           {error}
         </p>
       )}
-      {notice && <output>{notice}</output>}
+      {notice && <output className="conversation-notice">{notice}</output>}
+      {optimistic && (
+        <div className="conversation-thread">
+          <article className="thread-user">
+            <span className="thread-speaker">我：</span>
+            <p>{optimistic}</p>
+            <small>正在保存……</small>
+          </article>
+        </div>
+      )}
 
       {step.kind === "compose" && (
         <>
+          {!current?.claims.length && (
+            <div className="cloud-actions" aria-label="开始方式">
+              {STARTERS.map((text) => (
+                <button key={text} type="button" onClick={() => setEvent(text)}>
+                  {text.replace("……", "").replace("：", "")}
+                </button>
+              ))}
+            </div>
+          )}
+          <label>
+            说说一件具体的事
+            <textarea
+              value={event}
+              maxLength={5000}
+              rows={5}
+              onChange={(e) => setEvent(e.target.value)}
+              placeholder="发生了什么、当时怎么想、后来怎样都可以；不用一次说全。"
+            />
+          </label>
+          <button
+            type="button"
+            className="button primary"
+            disabled={busy || !event.trim()}
+            onClick={() => void startMessage(event.trim())}
+          >
+            保存并继续
+          </button>
           {open.length > 0 && (
             <div className="conversation-open">
-              <h3>还没谈完的事</h3>
+              <h3>最近对话</h3>
               <ul>
                 {open.map((item) => (
                   <li key={item.id}>
@@ -382,9 +495,9 @@ export function ConversationView({ resumeId }: { resumeId?: string | null } = {}
                     <br />
                     <span className="muted">
                       {item.open_question
-                        ? `等你回答：${item.open_question.question}`
+                        ? item.open_question.question
                         : item.key_uncertainty
-                          ? `卡在：${item.key_uncertainty}`
+                          ? item.key_uncertainty
                           : "可以接着说"}
                     </span>
                     <div className="cloud-actions">
@@ -467,49 +580,6 @@ export function ConversationView({ resumeId }: { resumeId?: string | null } = {}
               )}
             </details>
           )}
-          {!current?.claims.length && (
-            <div className="cloud-actions" aria-label="开始方式">
-              {STARTERS.map((text) => (
-                <button key={text} type="button" onClick={() => setEvent(text)}>
-                  {text.replace("……", "").replace("：", "")}
-                </button>
-              ))}
-            </div>
-          )}
-          <label>
-            说说一件具体的事
-            <textarea
-              value={event}
-              maxLength={5000}
-              rows={5}
-              onChange={(e) => setEvent(e.target.value)}
-              placeholder="发生了什么、当时怎么想、后来怎样都可以；不用一次说全。"
-            />
-          </label>
-          <button
-            type="button"
-            className="button primary"
-            disabled={busy || !event.trim()}
-            onClick={() =>
-              void run(async () => {
-                const started = await cloudMutation<StartResponse>("/api/core/explorations", {
-                  event: event.trim(),
-                  reply_first: true,
-                });
-                setEvent("");
-                // Start with a reply. Understanding updates are a separate choice.
-                if (started.event_source_id)
-                  await respond(
-                    started.exploration.id,
-                    started.exploration.version,
-                    started.event_source_id,
-                  );
-                else await proceed(started.exploration.id, started.exploration.version);
-              })
-            }
-          >
-            保存并继续
-          </button>
         </>
       )}
 
@@ -609,138 +679,150 @@ export function ConversationView({ resumeId }: { resumeId?: string | null } = {}
 
       {step.kind === "done" && (
         <div className="conversation-result">
-          {step.data.view?.experience && <h3>{step.data.view.experience.summary.slice(0, 80)}</h3>}
-          {step.data.processing && (
-            <output className="conversation-outcome">
-              <strong>{RESULT_LABEL[step.data.processing.result]}</strong>
-            </output>
-          )}
-          {step.data.reading?.current_reading && <p>{step.data.reading.current_reading}</p>}
-          {step.data.processing?.prior_effects.some((item) => item.effect !== "not_assessed") && (
-            <>
-              <h3>对已有认识的影响</h3>
+          {step.data.view && <ThreadLog view={step.data.view} />}
+          {(step.data.claims.length > 0 ||
+            step.data.processing ||
+            step.data.reading?.current_reading ||
+            step.data.gaps.length > 0) && (
+            <details className="conversation-insights">
+              <summary>
+                {step.data.processing && step.data.processing.result !== "unknown"
+                  ? "这次的认识变化"
+                  : "查看这段对话的理解与依据"}
+              </summary>
+              {step.data.processing && (
+                <output className="conversation-outcome">
+                  <strong>{RESULT_LABEL[step.data.processing.result]}</strong>
+                </output>
+              )}
+              {step.data.reading?.current_reading && <p>{step.data.reading.current_reading}</p>}
+              {step.data.processing?.prior_effects.some(
+                (item) => item.effect !== "not_assessed",
+              ) && (
+                <>
+                  <h3>对已有认识的影响</h3>
+                  <ul>
+                    {step.data.processing.prior_effects
+                      .filter((item) => item.effect !== "not_assessed")
+                      .map((item) => (
+                        <li key={item.prior_key}>
+                          <strong>{EFFECT_LABEL[item.effect] ?? item.effect}</strong>：{item.text}
+                          <br />
+                          <span className="muted">适用范围：{item.scope}</span>
+                          {item.rationale && <span className="muted"> · {item.rationale}</span>}
+                        </li>
+                      ))}
+                  </ul>
+                </>
+              )}
+              {usedCount > 0 && (
+                <p className="muted">
+                  本次参考了 {usedCount} 条已有认识；已撤回或失去依据的不作为前提。
+                </p>
+              )}
+              {step.data.claims.length > 0 && <h3>这件事形成的认识</h3>}
               <ul>
-                {step.data.processing.prior_effects
-                  .filter((item) => item.effect !== "not_assessed")
-                  .map((item) => (
-                    <li key={item.prior_key}>
-                      <strong>{EFFECT_LABEL[item.effect] ?? item.effect}</strong>：{item.text}
-                      <br />
-                      <span className="muted">适用范围：{item.scope}</span>
-                      {item.rationale && <span className="muted"> · {item.rationale}</span>}
-                    </li>
-                  ))}
-              </ul>
-            </>
-          )}
-          {usedCount > 0 && (
-            <p className="muted">
-              本次参考了 {usedCount} 条已有认识；已撤回或失去依据的不作为前提。
-            </p>
-          )}
-          <h3>这件事形成的认识</h3>
-          {step.data.claims.length === 0 && <p className="muted">目前没有形成认识。</p>}
-          <ul>
-            {step.data.claims.map((claim) => (
-              <li key={claim.claim_revision_id}>
-                {claim.text}
-                <br />
-                <span className="muted">
-                  适用范围：{claim.scope} · 依据：{claim.confidence_basis}
-                </span>
-                <div className="cloud-actions">
-                  <button
-                    type="button"
-                    className="button secondary"
-                    onClick={() => {
-                      setCorrecting(claim.claim_revision_id);
-                      setCorrectionNote("");
-                    }}
-                  >
-                    纠正这条
-                  </button>
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() =>
-                      void run(async () => {
-                        await cloudMutation(
-                          `/api/core/claim-revisions/${claim.claim_revision_id}/withdraw`,
-                          {},
-                        );
-                        await resume(step.data.exploration_id, false);
-                        setNotice("已停用这条认识，之后的回答和首页不会再使用它。");
-                      })
-                    }
-                  >
-                    以后不要再用这条
-                  </button>
-                </div>
-                {correcting === claim.claim_revision_id && (
-                  <div className="conversation-correct">
-                    <label>
-                      纠正类型
-                      <select
-                        value={correctionType}
-                        onChange={(e) => setCorrectionType(e.target.value)}
+                {step.data.claims.map((claim) => (
+                  <li key={claim.claim_revision_id}>
+                    {claim.text}
+                    <br />
+                    <span className="muted">
+                      适用范围：{claim.scope} · 依据：{claim.confidence_basis}
+                    </span>
+                    <div className="cloud-actions">
+                      <button
+                        type="button"
+                        className="button secondary"
+                        onClick={() => {
+                          setCorrecting(claim.claim_revision_id);
+                          setCorrectionNote("");
+                        }}
                       >
-                        {CORRECTION_TYPES.map(([key, label]) => (
-                          <option key={key} value={key}>
-                            {label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label>
-                      说明
-                      <textarea
-                        value={correctionNote}
-                        maxLength={4000}
-                        rows={3}
-                        onChange={(e) => setCorrectionNote(e.target.value)}
-                      />
-                    </label>
-                    <button
-                      type="button"
-                      className="button primary"
-                      disabled={busy || !correctionNote.trim()}
-                      onClick={() =>
-                        void run(async () => {
-                          const saved = await cloudMutation<{
-                            version: number;
-                            correction_source_id: string;
-                          }>(`/api/core/explorations/${step.data.exploration_id}/corrections`, {
-                            expected_version: step.data.version,
-                            claim_revision_ids: [claim.claim_revision_id],
-                            correction: { type: correctionType, note: correctionNote.trim() },
-                          });
-                          setCorrecting(null);
-                          await processCorrection(
-                            step.data.exploration_id,
-                            saved.version,
-                            saved.correction_source_id,
-                          );
-                        })
-                      }
-                    >
-                      保存纠正
-                    </button>
-                  </div>
-                )}
-              </li>
-            ))}
-          </ul>
-          {step.data.gaps.length > 0 && (
-            <>
-              <h3>仍不确定</h3>
-              <ul>
-                {step.data.gaps.map((gap) => (
-                  <li key={gap.id ?? gap.key ?? gap.question}>{gap.question}</li>
+                        纠正这条
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() =>
+                          void run(async () => {
+                            await cloudMutation(
+                              `/api/core/claim-revisions/${claim.claim_revision_id}/withdraw`,
+                              {},
+                            );
+                            await resume(step.data.exploration_id, false);
+                            setNotice("已停用这条认识，之后的回答和首页不会再使用它。");
+                          })
+                        }
+                      >
+                        以后不要再用这条
+                      </button>
+                    </div>
+                    {correcting === claim.claim_revision_id && (
+                      <div className="conversation-correct">
+                        <label>
+                          纠正类型
+                          <select
+                            value={correctionType}
+                            onChange={(e) => setCorrectionType(e.target.value)}
+                          >
+                            {CORRECTION_TYPES.map(([key, label]) => (
+                              <option key={key} value={key}>
+                                {label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label>
+                          说明
+                          <textarea
+                            value={correctionNote}
+                            maxLength={4000}
+                            rows={3}
+                            onChange={(e) => setCorrectionNote(e.target.value)}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          className="button primary"
+                          disabled={busy || !correctionNote.trim()}
+                          onClick={() =>
+                            void run(async () => {
+                              const saved = await cloudMutation<{
+                                version: number;
+                                correction_source_id: string;
+                              }>(`/api/core/explorations/${step.data.exploration_id}/corrections`, {
+                                expected_version: step.data.version,
+                                claim_revision_ids: [claim.claim_revision_id],
+                                correction: { type: correctionType, note: correctionNote.trim() },
+                              });
+                              setCorrecting(null);
+                              await processCorrection(
+                                step.data.exploration_id,
+                                saved.version,
+                                saved.correction_source_id,
+                              );
+                            })
+                          }
+                        >
+                          保存纠正
+                        </button>
+                      </div>
+                    )}
+                  </li>
                 ))}
               </ul>
-            </>
+              {step.data.gaps.length > 0 && (
+                <>
+                  <h3>仍不确定</h3>
+                  <ul>
+                    {step.data.gaps.map((gap) => (
+                      <li key={gap.id ?? gap.key ?? gap.question}>{gap.question}</li>
+                    ))}
+                  </ul>
+                </>
+              )}
+            </details>
           )}
-
           {!!step.data.view?.pending?.corrections.length && (
             <div className="conversation-saved">
               <h3>已保存、尚未处理的纠正</h3>
@@ -767,37 +849,28 @@ export function ConversationView({ resumeId }: { resumeId?: string | null } = {}
             </div>
           )}
 
-          {step.data.view?.turns?.some((turn) => turn.role === "user" && turn.content.trim()) && (
-            <div className="conversation-saved">
-              <p>可以继续聊；需要时，也可以根据这段对话更新认识。</p>
-              <button
-                type="button"
-                className="button secondary"
-                disabled={busy}
-                onClick={() => void run(() => proceed(step.data.exploration_id, step.data.version))}
-              >
-                更新认识
-              </button>
-            </div>
-          )}
+          <details className="conversation-tools">
+            <summary>对话选项</summary>
+            <button
+              type="button"
+              className="button secondary"
+              disabled={busy}
+              onClick={() => void run(() => proceed(step.data.exploration_id, step.data.version))}
+            >
+              更新认识
+            </button>
+            <p className="muted">需要时，再根据这段对话整理认识。</p>
+          </details>
           <div className="conversation-thread">
-            <h3>接着聊这件事</h3>
-            {(step.data.view?.turns ?? [])
-              .filter((turn) => turn.content)
-              .map((turn) => (
-                <p key={turn.id} className={turn.role === "user" ? "thread-user" : "thread-reply"}>
-                  <span className="muted">
-                    {turn.role === "user" ? (THREAD_LABEL[turn.turnKind] ?? "我") : "FindMe"}：
-                  </span>
-                  {turn.content}
-                </p>
-              ))}
             {step.data.view?.pending?.messages.map((item) => (
               <p key={item.source_id} className="muted">
-                这条消息已保存，还没有回应：{item.message.slice(0, 60)}{" "}
+                {replying === item.source_id
+                  ? "正在回应这条消息："
+                  : "这条消息已保存，还没有回应："}
+                {item.message.slice(0, 60)}{" "}
                 <button
                   type="button"
-                  disabled={busy}
+                  disabled={busy || replying === item.source_id}
                   onClick={() =>
                     void run(() =>
                       respond(step.data.exploration_id, step.data.version, item.source_id),
@@ -808,33 +881,45 @@ export function ConversationView({ resumeId }: { resumeId?: string | null } = {}
                 </button>
               </p>
             ))}
-            <label>
-              接着说
-              <textarea
-                value={followUp}
-                maxLength={5000}
-                rows={3}
-                onChange={(e) => setFollowUp(e.target.value)}
-                placeholder="没听明白、想比较选择、事情有了进展，都可以直接说。"
-              />
-            </label>
-            <button
-              type="button"
-              className="button primary"
-              disabled={busy || !followUp.trim()}
-              onClick={() =>
-                void run(async () => {
-                  const saved = await cloudMutation<{ version: number; message_source_id: string }>(
-                    `/api/core/explorations/${step.data.exploration_id}/messages`,
-                    { expected_version: step.data.version, message: followUp.trim() },
-                  );
-                  setFollowUp("");
-                  await respond(step.data.exploration_id, saved.version, saved.message_source_id);
-                })
-              }
-            >
-              发送
-            </button>
+            <div className="conversation-composer">
+              <label>
+                接着说
+                <textarea
+                  value={followUp}
+                  maxLength={5000}
+                  rows={3}
+                  onChange={(e) => setFollowUp(e.target.value)}
+                  placeholder="没听明白、想比较选择、事情有了进展，都可以直接说。"
+                />
+              </label>
+              <button
+                type="button"
+                className="button primary"
+                disabled={busy || !!replying || !followUp.trim()}
+                onClick={() =>
+                  void run(async () => {
+                    const generation = viewGeneration.current;
+                    setOptimistic(followUp.trim());
+                    const saved = await cloudMutation<{
+                      version: number;
+                      message_source_id: string;
+                    }>(`/api/core/explorations/${step.data.exploration_id}/messages`, {
+                      expected_version: step.data.version,
+                      message: followUp.trim(),
+                    });
+                    if (generation !== viewGeneration.current) return;
+                    setFollowUp("");
+                    await attachView(step.data.exploration_id);
+                    await resume(step.data.exploration_id, false, generation);
+                    if (generation !== viewGeneration.current) return;
+                    setOptimistic("");
+                    await respond(step.data.exploration_id, saved.version, saved.message_source_id);
+                  })
+                }
+              >
+                发送
+              </button>
+            </div>
           </div>
 
           <div className="cloud-actions">
@@ -909,12 +994,18 @@ function ThreadLog({ view }: { view: ExplorationView }) {
   return (
     <div className="conversation-thread">
       {turns.map((turn) => (
-        <p key={turn.id} className={turn.role === "user" ? "thread-user" : "thread-reply"}>
-          <span className="muted">
+        <article key={turn.id} className={turn.role === "user" ? "thread-user" : "thread-reply"}>
+          <span className="thread-speaker">
             {turn.role === "user" ? (THREAD_LABEL[turn.turnKind] ?? "我") : "FindMe"}：
           </span>
-          {turn.content}
-        </p>
+          {turn.role === "user" ? (
+            <p>{turn.content}</p>
+          ) : (
+            <div className="thread-markdown">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{turn.content}</ReactMarkdown>
+            </div>
+          )}
+        </article>
       ))}
     </div>
   );

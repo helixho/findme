@@ -4,7 +4,7 @@ import { defineConfig } from "@playwright/test";
 const real = process.env.FINDME_BROWSER_REAL === "1";
 export default defineConfig({
   testDir: ".",
-  testMatch: real ? "real.spec.ts" : "synthetic.spec.ts",
+  testMatch: real ? "real.spec.ts" : ["synthetic.spec.ts", "chat.spec.ts"],
   forbidOnly: true,
   fullyParallel: false,
   workers: 1,

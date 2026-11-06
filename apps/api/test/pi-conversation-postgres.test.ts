@@ -721,3 +721,61 @@ it("rebuilds a pending earlier reply without later messages and reads replies be
     await f.close();
   }
 });
+
+it("unwraps stored pi reply envelopes on rebuild without rewriting the stored turn or user JSON", async () => {
+  const f = await fixture();
+  try {
+    const thread = await conversation(f.db, f.ctx, "OLD_USER_INPUT");
+    const envelope = JSON.stringify({
+      reply: "LEGACY_DB_ANSWER",
+      used_claim_keys: [],
+      new_information: false,
+      new_information_note: null,
+    });
+    await withProfileTransaction(f.db, f.ctx, async (tx) => {
+      const [reply] = await tx
+        .insert(c.explorationTurns)
+        .values({
+          explorationId: thread.id,
+          role: "assistant",
+          turnKind: "pi_reply",
+          content: envelope,
+        })
+        .returning();
+      await tx
+        .update(c.sourceItems)
+        .set({
+          sourceMeta: {
+            exploration_id: thread.id,
+            reply_status: "replied",
+            reply: { engine: "pi", turn_id: reply?.id, source_ids: [thread.sourceId] },
+          },
+        })
+        .where(eq(c.sourceItems.id, thread.sourceId));
+    });
+    const next = await nextMessage(f, thread.id, thread.version, envelope);
+    let history: Array<{ role: string; content: string }> = [];
+    responses(f, [
+      (context) => {
+        const text = context.messages
+          .flatMap((m) =>
+            typeof m.content === "string"
+              ? [m.content]
+              : m.content.filter((p) => p.type === "text").map((p) => p.text),
+          )
+          .find((t) => t.includes("以下是本会话有效历史资料"));
+        if (text) history = JSON.parse(text.slice(text.indexOf("\n") + 1));
+        return final("new answer");
+      },
+    ]);
+    expect((await request(f, next)).status).toBe(201);
+    expect(history.find((t) => t.role === "assistant")?.content).toBe("LEGACY_DB_ANSWER");
+    const stored = await withProfileTransaction(f.db, f.ctx, (tx) =>
+      tx.select().from(c.explorationTurns).where(eq(c.explorationTurns.explorationId, thread.id)),
+    );
+    expect(stored.some((t) => t.role === "assistant" && t.content === envelope)).toBe(true);
+    expect(stored.some((t) => t.role === "user" && t.content === envelope)).toBe(true);
+  } finally {
+    await f.close();
+  }
+});

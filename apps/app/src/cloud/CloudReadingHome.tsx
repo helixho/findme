@@ -1,12 +1,7 @@
 import { ChevronRight } from "lucide-react";
 import { useEffect, useState } from "react";
 import { cloudRequest } from "../cloud-api";
-import type {
-  CurrentUnderstandingResponse,
-  ExplorationListResponse,
-  ExplorationSummary,
-  UnderstandingChange,
-} from "../types";
+import type { ExplorationListResponse, ExplorationSummary, UnderstandingChange } from "../types";
 import type { ReportPane } from "./RunDetail";
 import { type Run, domainLabels, labels, message } from "./shared";
 
@@ -16,6 +11,8 @@ export function CloudReadingHome({
   mode,
   onOpen,
   onTalk,
+  onStart,
+  onUnderstanding,
   refreshToken = 0,
 }: {
   runs: Run[];
@@ -24,33 +21,41 @@ export function CloudReadingHome({
   onOpen: (runId: string, pane?: ReportPane) => void;
   /** Opens the conversation, optionally continuing a saved matter. */
   onTalk?: (explorationId?: string) => void;
+  onStart?: (message: string) => void;
+  onUnderstanding?: () => void;
   /** Changes when the workspace refreshes (window visible again, home clicked). */
   refreshToken?: number;
 }) {
   const [core, setCore] = useState<{
-    current: CurrentUnderstandingResponse;
     changes: UnderstandingChange[];
-    open: ExplorationSummary[];
+    recent: ExplorationSummary[];
   } | null>(null);
+  const [draft, setDraft] = useState("");
+  const [conversationError, setConversationError] = useState("");
   // biome-ignore lint/correctness/useExhaustiveDependencies: refreshToken requests a re-read.
   useEffect(() => {
     // Keep the shown data until the newer read arrives; a superseded read is ignored.
     let active = true;
     if (profile && mode === "home")
       void Promise.all([
-        cloudRequest<CurrentUnderstandingResponse>("/api/core/understanding"),
-        cloudRequest<{ items: UnderstandingChange[] }>("/api/core/understanding/changes?limit=8"),
-        cloudRequest<ExplorationListResponse>("/api/core/explorations?status=active&limit=5"),
+        cloudRequest<{ items: UnderstandingChange[] }>(
+          "/api/core/understanding/changes?limit=8",
+        ).catch(() => ({ items: [] })),
+        cloudRequest<ExplorationListResponse>("/api/core/explorations?limit=8"),
       ])
-        .then(([current, changes, open]) => {
-          if (active)
+        .then(([changes, open]) => {
+          if (active) {
+            setConversationError("");
             setCore({
-              current: { ...current, claims: current.claims ?? [] },
               changes: changes.items ?? [],
-              open: (open.items ?? []).filter((item) => !item.parked),
+              recent: (open.items ?? []).filter((item) => item.status !== "abandoned"),
             });
+          }
         })
-        .catch(() => undefined);
+        .catch(() => {
+          if (active)
+            setConversationError("最近对话暂时读不到，可以先聊件新的，或稍后重新打开首页。");
+        });
     return () => {
       active = false;
     };
@@ -95,79 +100,8 @@ export function CloudReadingHome({
     core && reportTime
       ? core.changes.filter((c) => new Date(c.changed_at) > new Date(reportTime))
       : [];
-  const coreClaims = core?.current.claims ?? [];
-  // D30: an unfinished matter comes first; right after a first review with no
-  // conversation yet, the report invites checking; otherwise start from today.
-  const firstReview = !!current && !coreClaims.length && !core?.open.length;
-  const continueBlock = mode === "home" && !!core?.open.length && (
-    <section className="home-section" aria-label="还没谈完的事">
-      <div className="section-head">
-        <h2>接着上次的事</h2>
-      </div>
-      {core.open.slice(0, 2).map((item) => (
-        <article key={item.id}>
-          <p>
-            <strong>{item.summary.slice(0, 80)}</strong>
-          </p>
-          <p className="muted">
-            {item.open_question
-              ? `等你回答：${item.open_question.question}`
-              : item.key_uncertainty
-                ? `卡在：${item.key_uncertainty}`
-                : "可以接着说"}
-          </p>
-          <button type="button" className="button primary" onClick={() => onTalk?.(item.id)}>
-            继续这件事
-          </button>
-        </article>
-      ))}
-    </section>
-  );
-  const nowBlock = mode === "home" && core && (
-    <section className="home-section" aria-label="当前认识">
-      <div className="section-head">
-        <h2>现在的理解</h2>
-        <span className="fm-meta">{coreClaims.length} 条有效认识</span>
-      </div>
-      {!core.open.length && (
-        <button type="button" className="button primary" onClick={() => onTalk?.()}>
-          说一件现在在意的事
-        </button>
-      )}
-      {coreClaims.length > 0 && (
-        <ul>
-          {coreClaims.slice(0, 5).map((claim) => (
-            <li key={claim.claim_revision_id}>
-              {claim.text}
-              <br />
-              <span className="muted">适用范围：{claim.scope}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-      {core.changes.length > 0 && (
-        <details className="fm-secondary-nav">
-          <summary>最近的认识变化</summary>
-          <ul>
-            {core.changes.map((change) => (
-              <li key={change.claim_revision_id}>
-                <span className="fm-status">{CHANGE_LABEL[change.change]}</span> {change.text}
-                <br />
-                <span className="muted">
-                  {new Date(change.changed_at).toLocaleDateString("zh-CN")}
-                  {change.reason ? ` · ${change.reason}` : ""}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </details>
-      )}
-    </section>
-  );
-  return (
+  const reportContent = (
     <section>
-      {!firstReview && continueBlock}
-      {!firstReview && nowBlock}
       {mode === "home" ? (
         <section className="fm-hero">
           <div>
@@ -186,7 +120,7 @@ export function CloudReadingHome({
             {current && laterChanges.length > 0 && (
               <p className="form-error">
                 这份报告生成之后，你的认识有 {laterChanges.length}{" "}
-                处变化（见“现在的理解”）。报告中涉及这些内容的判断可能已不再成立，以现在的理解为准。
+                处变化。报告中涉及这些内容的判断可能已不再成立，以现在的理解为准。
               </p>
             )}
             <div className="cloud-actions">
@@ -229,8 +163,6 @@ export function CloudReadingHome({
           </div>
         </section>
       )}
-      {firstReview && continueBlock}
-      {firstReview && nowBlock}
       {error && (
         <p className="form-error" role="alert">
           整体报告读取失败：{error}。未展示缓存结论，请重新读取。
@@ -281,6 +213,102 @@ export function CloudReadingHome({
               <small>{l.scope}</small>
             </article>
           ))}
+        </details>
+      )}
+    </section>
+  );
+  if (mode !== "home") return reportContent;
+  return (
+    <section className="daily-home" aria-label="日常交流">
+      <header className="daily-home-heading">
+        <span className="fm-meta">FINDME · 日常商量</span>
+        <h1>今天，想从哪里说起？</h1>
+        <p className="muted">一个问题，一点近况，或者还没想清楚的念头。</p>
+      </header>
+      <form
+        className="daily-home-composer"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (!draft.trim() || !onStart) return;
+          onStart(draft.trim());
+          setDraft("");
+        }}
+      >
+        <label className="sr-only" htmlFor="home-message">
+          聊件新的
+        </label>
+        <textarea
+          id="home-message"
+          value={draft}
+          maxLength={5000}
+          rows={3}
+          onChange={(event) => setDraft(event.target.value)}
+          placeholder="说一件现在在意的事……"
+        />
+        <div className="daily-home-composer-foot">
+          <span className="muted">不用先整理好再说</span>
+          <button type="submit" className="button primary" disabled={!draft.trim() || !onStart}>
+            发送 ↑
+          </button>
+        </div>
+      </form>
+      <section className="daily-recent" aria-label="最近对话">
+        <div className="section-head">
+          <h2>接着聊</h2>
+          <button type="button" className="daily-text-button" onClick={() => onTalk?.()}>
+            聊件新的 ＋
+          </button>
+        </div>
+        {conversationError && <output className="muted">{conversationError}</output>}
+        {!core && !conversationError && <p className="muted">正在找回最近的对话…</p>}
+        {core && core.recent.length === 0 && (
+          <p className="muted">还没有对话。从上面说件现在在意的事就好。</p>
+        )}
+        {core?.recent.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            className="daily-recent-talk"
+            onClick={() => onTalk?.(item.id)}
+          >
+            <span>
+              <strong>{item.summary.slice(0, 100) || "未命名对话"}</strong>
+              <span className="daily-recent-meta">
+                {new Date(item.last_activity_at).toLocaleDateString("zh-CN")}
+                {item.status === "completed"
+                  ? " · 已结束，仍可接着聊"
+                  : item.parked
+                    ? " · 暂放这里"
+                    : " · 可以接着说"}
+              </span>
+            </span>
+            <ChevronRight size={18} aria-hidden="true" />
+          </button>
+        ))}
+      </section>
+      <div className="daily-home-understanding">
+        <div>
+          <h2>慢慢认识自己</h2>
+          <p className="muted">理解可以修改，不需要每次聊天都得出结论。</p>
+        </div>
+        <button type="button" className="daily-text-button" onClick={onUnderstanding}>
+          看看已有认识 →
+        </button>
+      </div>
+      {core && core.changes.length > 0 && (
+        <details className="daily-changes">
+          <summary>最近的认识变化</summary>
+          {core.changes.map((change) => (
+            <p key={change.claim_revision_id}>
+              <span className="fm-meta">{CHANGE_LABEL[change.change]}</span> {change.text}
+            </p>
+          ))}
+        </details>
+      )}
+      {(runs.length > 0 || error) && (
+        <details className="daily-reports">
+          <summary>整体报告与专题</summary>
+          {reportContent}
         </details>
       )}
     </section>

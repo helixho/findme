@@ -44,6 +44,7 @@ export default function CloudWorkspace() {
   >("home");
   const [selectedRun, setSelectedRun] = useState<string | null>(null);
   const [talkTarget, setTalkTarget] = useState<string | null>(null);
+  const [talkInitialMessage, setTalkInitialMessage] = useState("");
   // Bumped whenever the workspace refreshes, so the home re-reads Core state too.
   const [homeToken, setHomeToken] = useState(0);
   const [detailPane, setDetailPane] = useState<ReportPane>("read");
@@ -126,6 +127,8 @@ export default function CloudWorkspace() {
     setProfile(id);
     setRuns([]);
     setSelectedRun(null);
+    setTalkInitialMessage("");
+    setTalkTarget(null);
     setView("home");
     setError("");
   }
@@ -205,7 +208,12 @@ export default function CloudWorkspace() {
           />
         )}
         {view === "talk" && profile && (
-          <ConversationView key={`${profile}:${talkTarget ?? ""}`} resumeId={talkTarget} />
+          <ConversationView
+            key={`${profile}:${talkTarget ?? ""}`}
+            resumeId={talkTarget}
+            initialMessage={talkInitialMessage}
+            onInitialMessageConsumed={() => setTalkInitialMessage("")}
+          />
         )}
         {view === "understanding" && profile && (
           <UnderstandingList
@@ -242,59 +250,69 @@ export default function CloudWorkspace() {
                 mode={view as "home" | "topics" | "history"}
                 refreshToken={homeToken}
                 onTalk={(id) => {
+                  setTalkInitialMessage("");
                   setTalkTarget(id ?? null);
                   setView("talk");
                   window.scrollTo({ top: 0, behavior: "instant" });
                 }}
+                onStart={(text) => {
+                  setTalkTarget(null);
+                  setTalkInitialMessage(text);
+                  setView("talk");
+                  window.scrollTo({ top: 0, behavior: "instant" });
+                }}
+                onUnderstanding={() => setView("understanding")}
                 onOpen={(id, pane = "read") => {
                   setSelectedRun(id);
                   setDetailPane(pane);
                   window.scrollTo({ top: 0, behavior: "instant" });
                 }}
               />
-              <details className="fm-secondary-nav">
-                <summary>从新的经历或问题开始</summary>
-                <section className="home-section">
-                  <h2>开始新的理解</h2>
-                  <label>
-                    问题
-                    <input
-                      value={question}
-                      maxLength={2000}
-                      onChange={(e) => setQuestion(e.target.value)}
-                      placeholder="现在想理解什么？"
-                    />
-                  </label>
-                  <label>
-                    专题
-                    <select value={domain} onChange={(e) => setDomain(e.target.value)}>
-                      <option value="self_understanding">自我理解</option>
-                      <option value="role_direction">角色与方向</option>
-                      <option value="collaboration">协作与边界</option>
-                      <option value="daily_conditions">日常条件</option>
-                      <option value="overall">已有专题的综合总览</option>
-                    </select>
-                  </label>
-                  <button
-                    type="button"
-                    className="button primary"
-                    disabled={busy || !question.trim() || !profile}
-                    onClick={() =>
-                      void action(async () => {
-                        const run = await cloudMutation<Run>("/api/diagnostics", {
-                          question,
-                          domain,
-                        });
-                        setQuestion("");
-                        await refreshRuns();
-                        setSelectedRun(run.id);
-                      })
-                    }
-                  >
-                    创建专题，不调用模型
-                  </button>
-                </section>
-              </details>
+              {view !== "home" && (
+                <details className="fm-secondary-nav">
+                  <summary>创建专题报告</summary>
+                  <section className="home-section">
+                    <h2>创建专题报告</h2>
+                    <label>
+                      问题
+                      <input
+                        value={question}
+                        maxLength={2000}
+                        onChange={(e) => setQuestion(e.target.value)}
+                        placeholder="现在想理解什么？"
+                      />
+                    </label>
+                    <label>
+                      专题
+                      <select value={domain} onChange={(e) => setDomain(e.target.value)}>
+                        <option value="self_understanding">自我理解</option>
+                        <option value="role_direction">角色与方向</option>
+                        <option value="collaboration">协作与边界</option>
+                        <option value="daily_conditions">日常条件</option>
+                        <option value="overall">已有专题的综合总览</option>
+                      </select>
+                    </label>
+                    <button
+                      type="button"
+                      className="button primary"
+                      disabled={busy || !question.trim() || !profile}
+                      onClick={() =>
+                        void action(async () => {
+                          const run = await cloudMutation<Run>("/api/diagnostics", {
+                            question,
+                            domain,
+                          });
+                          setQuestion("");
+                          await refreshRuns();
+                          setSelectedRun(run.id);
+                        })
+                      }
+                    >
+                      创建专题，不调用模型
+                    </button>
+                  </section>
+                </details>
+              )}
             </>
           ))}
         <details className="fm-secondary-nav">

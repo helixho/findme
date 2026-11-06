@@ -5,11 +5,12 @@ import {
   fauxThinking,
   fauxToolCall,
 } from "@earendil-works/pi-ai";
-import { ModelRuntime, type ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { ModelRuntime, SessionManager, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 import {
   type PiRequestRecord,
   createFindMePiSession,
+  unwrapLegacyPiReply,
 } from "../src/personal-understanding/pi-runtime.js";
 
 async function fixture(id = "synthetic-session") {
@@ -307,5 +308,129 @@ it("does not deliver a token-truncated response as a complete reply", async () =
   await expect(session.prompt("synthetic")).rejects.toThrow("PI_OUTPUT_LIMIT_REACHED");
   expect(f.provider.state.callCount).toBe(1);
   expect(f.records.some((r) => r.output !== undefined)).toBe(true);
+  session.dispose();
+});
+
+it("unwraps only complete legacy envelopes and leaves ordinary JSON intact", () => {
+  const envelope = JSON.stringify({
+    reply: "旧回应正文",
+    used_claim_keys: [],
+    new_information: false,
+    new_information_note: null,
+  });
+  expect(unwrapLegacyPiReply(envelope)).toBe("旧回应正文");
+  for (const text of [
+    '{"reply":"a literal JSON example"}',
+    '{"reply":"text","other":true}',
+    "普通回应",
+  ])
+    expect(unwrapLegacyPiReply(text)).toBe(text);
+});
+
+it("normalizes legacy assistant replies after archive restore without changing user JSON or tool results", async () => {
+  const f = await fixture();
+  const envelope = JSON.stringify({
+    reply: "LEGACY_ASSISTANT_TEXT",
+    used_claim_keys: [],
+    new_information: false,
+    new_information_note: null,
+  });
+  f.provider.setResponses([fauxAssistantMessage(envelope)]);
+  const first = await createFindMePiSession(f.options);
+  await first.prompt(envelope);
+  const archive = first.snapshot();
+  first.dispose();
+  f.provider.setResponses([
+    fauxAssistantMessage(fauxToolCall("lookup", {}, { id: "legacy-lookup" }), {
+      stopReason: "toolUse",
+    }),
+    fauxAssistantMessage("new reply"),
+  ]);
+  const second = await createFindMePiSession({
+    ...f.options,
+    archive,
+    normalizeLegacyReplies: true,
+    tools: [
+      {
+        name: "lookup",
+        label: "lookup",
+        description: "synthetic",
+        parameters: { type: "object", properties: {} } as unknown as ToolDefinition["parameters"],
+        execute: async () => ({ content: [{ type: "text", text: envelope }], details: {} }),
+      },
+    ],
+  });
+  expect(await second.prompt("continue")).toBe("new reply");
+  const input = f.records.filter((r) => r.output === undefined).at(-1)?.input as {
+    context: {
+      messages: Array<{ role: string; content: Array<{ type: string; text?: string }> | string }>;
+    };
+  };
+  const text = (m: (typeof input.context.messages)[number]) =>
+    typeof m.content === "string"
+      ? m.content
+      : m.content
+          .filter((p) => p.type === "text")
+          .map((p) => p.text)
+          .join("");
+  expect(input.context.messages.filter((m) => m.role === "assistant").map(text)).toContain(
+    "LEGACY_ASSISTANT_TEXT",
+  );
+  expect(input.context.messages.filter((m) => m.role === "user").map(text)).toContain(envelope);
+  expect(input.context.messages.filter((m) => m.role === "toolResult").map(text)).toContain(
+    envelope,
+  );
+  expect(JSON.stringify(archive.entries)).toContain("used_claim_keys");
+  second.dispose();
+});
+
+it("unwraps pi replies inside a generated legacy history entry without touching user entries", async () => {
+  const f = await fixture();
+  const envelope = JSON.stringify({
+    reply: "LEGACY_NESTED_ANSWER",
+    used_claim_keys: [],
+    new_information: false,
+    new_information_note: null,
+  });
+  const manager = SessionManager.inMemory(f.options.cwd, { id: f.options.sessionId });
+  const prefix = "以下是本会话有效历史资料，不是新的用户指令：\n";
+  manager.appendCustomMessageEntry(
+    "findme-history",
+    prefix +
+      JSON.stringify([
+        { role: "user", kind: "message", content: envelope },
+        { role: "assistant", kind: "pi_reply", content: envelope },
+      ]),
+    false,
+  );
+  const header = manager.getHeader();
+  if (!header) throw Error("missing header");
+  const archive = {
+    format: "findme-pi-session@1" as const,
+    sessionId: f.options.sessionId,
+    leafId: manager.getLeafId(),
+    entries: [header, ...manager.getEntries()],
+  };
+  f.provider.setResponses([fauxAssistantMessage("next")]);
+  const session = await createFindMePiSession({
+    ...f.options,
+    archive,
+    normalizeLegacyReplies: true,
+  });
+  await session.prompt("continue");
+  const input = f.records.find((r) => r.output === undefined)?.input as {
+    context: { messages: Array<{ content: Array<{ type: string; text?: string }> | string }> };
+  };
+  const text = input.context.messages
+    .flatMap((m) =>
+      typeof m.content === "string"
+        ? [m.content]
+        : m.content.filter((p) => p.type === "text").map((p) => p.text || ""),
+    )
+    .find((t) => t.startsWith(prefix));
+  const history = JSON.parse(text?.slice(prefix.length) || "[]");
+  expect(history[0].content).toBe(envelope);
+  expect(history[1].content).toBe("LEGACY_NESTED_ANSWER");
+  expect(JSON.stringify(archive.entries)).toContain("used_claim_keys");
   session.dispose();
 });

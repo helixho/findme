@@ -70,10 +70,14 @@ fi
 mkdir -p "$STATE/files" "$STATE/pnpm-store" "$STATE/releases"
 RELEASE=$STATE/releases/$COMMIT
 PREVIOUS=$(readlink -f "$STATE/current" 2>/dev/null || true)
+check_ready() {
+  FINDME_CHECK_PORT=$PORT "$NODE" --input-type=module -e 'for(const p of ["/", "/health?strict=1", "/ready"]){ const r=await fetch("http://127.0.0.1:"+process.env.FINDME_CHECK_PORT+p,{signal:AbortSignal.timeout(1500)});if(!r.ok)process.exit(1);}'
+}
 # Never rebuild an active release in place, even when redeploying the same commit.
 if [[ $PREVIOUS == "$RELEASE" ]]; then
   echo '[deploy] This release is already current; checking existing service'
   "${SUDO[@]}" systemctl is-active --quiet findme-app
+  check_ready || { echo 'Current application is running but not ready.' >&2; exit 1; }
   exit 0
 fi
 [[ ! -e $RELEASE ]] || { echo 'Incomplete release directory exists; inspect/remove it before retrying.' >&2; exit 1; }
@@ -159,7 +163,7 @@ if [[ -n $LEGACY_APP ]]; then docker stop --time 120 "$LEGACY_APP" >/dev/null; f
 "${SUDO[@]}" systemctl restart findme-app
 READY=0
 for ((i=0;i<60;i++)); do
-  if FINDME_CHECK_PORT=$PORT "$NODE" --input-type=module -e 'for(const p of ["/", "/health?strict=1", "/ready"]){ const r=await fetch("http://127.0.0.1:"+process.env.FINDME_CHECK_PORT+p,{signal:AbortSignal.timeout(1500)});if(!r.ok)process.exit(1);}' >/dev/null 2>&1; then READY=1; break; fi
+  if check_ready >/dev/null 2>&1; then READY=1; break; fi
   sleep 1
 done
 ((READY)) || { echo 'New application did not become ready.' >&2; false; }
