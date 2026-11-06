@@ -18,20 +18,47 @@ const Input = z.object({
 
 /** Exact question/option spans preserve short answers without importing old interpretations. */
 export function questionBackgroundSpans(text: string) {
-  const matches = [
-    ...text.matchAll(/[^。！？\n]*[?？]/g),
-    ...text.matchAll(/^\s*[A-HＡ-Ｈ][.、．:：)]\s*[^\n]*/gm),
+  const options = [
+    ...text.matchAll(
+      /^[ \t]*(?:[-+*][ \t]+)?(?:\*\*|__)?[A-HＡ-Ｈ](?:\*\*|__)?[ \t]*[.、．:：)](?:\*\*|__)?[ \t]*[^\r\n]*/gm,
+    ),
   ];
-  return matches
-    .map((match) => ({
-      start: match.index ?? 0,
-      end: (match.index ?? 0) + match[0].length,
-      text: match[0],
-    }))
-    .sort((a, b) => a.start - b.start)
-    .filter(
-      (span, i, all) => all.findIndex((s) => s.start === span.start && s.end === span.end) === i,
-    );
+  const spans = [...text.matchAll(/[^。！？\n]*[?？]/g), ...options].map((match) => ({
+    start: match.index ?? 0,
+    end: (match.index ?? 0) + match[0].length,
+    text: match[0],
+  }));
+  for (const [i, option] of options.entries()) {
+    const start = option.index ?? 0;
+    const previous = options[i - 1];
+    // Only the first option in a block owns the immediately preceding prompt.
+    if (previous && !text.slice((previous.index ?? 0) + previous[0].length, start).trim()) continue;
+    const prefix = text.slice(0, start).trimEnd();
+    if (!/[:：](?:\*\*|__)?$/.test(prefix)) continue;
+    const breaks = [...prefix.matchAll(/\r?\n[ \t]*\r?\n/g)];
+    const boundary = breaks.at(-1);
+    const paragraphStart = boundary ? (boundary.index ?? 0) + boundary[0].length : 0;
+    const raw = prefix.slice(paragraphStart);
+    const prompt = raw.trimStart();
+    // Keep the question paragraph, never an unbounded preceding analysis.
+    if (!prompt || prompt.length > 360 || prompt.split(/\r?\n/).length > 4) continue;
+    spans.push({
+      start: paragraphStart + raw.length - prompt.length,
+      end: prefix.length,
+      text: prompt,
+    });
+  }
+  // Merge overlapping question/prompt matches without duplicating their text.
+  return spans
+    .sort((a, b) => a.start - b.start || b.end - a.end)
+    .reduce<typeof spans>((all, span) => {
+      const previous = all.at(-1);
+      if (previous && span.start < previous.end) {
+        previous.end = Math.max(previous.end, span.end);
+        previous.text = text.slice(previous.start, previous.end);
+      } else all.push({ ...span });
+      return all;
+    }, []);
 }
 export function questionBackground(text: string) {
   return questionBackgroundSpans(text)

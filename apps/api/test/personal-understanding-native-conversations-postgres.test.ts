@@ -5,7 +5,11 @@ import { eq } from "drizzle-orm";
 import { expect, it } from "vitest";
 import { ProfileService } from "../src/auth/profiles.js";
 import { withProfileTransaction } from "../src/cloud-diagnostic/scope.js";
-import { NativeConversationReader } from "../src/personal-understanding/native-conversations.js";
+import {
+  NativeConversationReader,
+  questionBackground,
+  questionBackgroundSpans,
+} from "../src/personal-understanding/native-conversations.js";
 
 it("reads complete native messages, preserves short-answer context and withholds excluded history", async () => {
   const config = JSON.parse(await readFile(process.env.FINDME_ACCOUNT_VERIFY_CONFIG!, "utf8"));
@@ -303,4 +307,26 @@ it("cuts cross-conversation bodies and question background off at asOf but check
   } finally {
     await Promise.all([runtime.sql.end(), identity.sql.end()]);
   }
+});
+
+it("preserves Markdown option labels and their bounded colon-ended question paragraph as exact spans", () => {
+  const source =
+    "OLD_INTERPRETATION。这里是此前分析。\r\n\r\n**请选一个最符合当前安排的描述：**\r\n\r\n- **A**：先完成预约\r\n+ **B：** 等资料齐了再决定\r\n* __Ｃ__． 请别人代办\r\nD. 暂时不安排\r\n\r\nAFTER_INTERPRETATION。后面是旧建议。";
+  const spans = questionBackgroundSpans(source);
+  for (const span of spans) expect(source.slice(span.start, span.end)).toBe(span.text);
+  const background = questionBackground(source);
+  expect(background).toContain("**请选一个最符合当前安排的描述：**");
+  expect(background).toContain("- **A**：先完成预约");
+  expect(background).toContain("+ **B：** 等资料齐了再决定");
+  expect(background).toContain("* __Ｃ__． 请别人代办");
+  expect(background).toContain("D. 暂时不安排");
+  expect(background).not.toContain("OLD_INTERPRETATION");
+  expect(background).not.toContain("AFTER_INTERPRETATION");
+  expect(spans).toHaveLength(5);
+  // A colon does not turn a large analysis paragraph into question context.
+  const longSource = `LONG_ANALYSIS${"长分析".repeat(150)}：\n- **A**：第一项\n- **B：** 第二项`;
+  expect(questionBackground(longSource)).not.toContain("LONG_ANALYSIS");
+  const multiline =
+    "上一个判断。\n\n请根据现在的安排\n选一个最合适的：\n- **A：** 先留空\n- **B**：约下周";
+  expect(questionBackground(multiline)).toContain("请根据现在的安排\n选一个最合适的：");
 });
