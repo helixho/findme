@@ -254,6 +254,25 @@ export async function createFindMePiSession(options: FindMePiOptions) {
         if (last?.stopReason === "error") throw new Error("PI_MODEL_ERROR");
         return session.getLastAssistantText() ?? "";
       }),
+    /** Keep the original draft in the source archive, replace its future context contribution. */
+    reviseLastAssistant: (text: string) => {
+      if (busy) throw new Error("PI_SESSION_BUSY");
+      if (!text.trim()) throw new Error("PI_REVISION_EMPTY");
+      const target = manager
+        .getBranch()
+        .slice()
+        .reverse()
+        .find((entry) => entry.type === "message" && entry.message.role === "assistant");
+      if (!target || target.type !== "message" || target.message.role !== "assistant")
+        throw new Error("PI_ASSISTANT_MESSAGE_MISSING");
+      if (["toolUse", "error", "aborted"].includes(target.message.stopReason))
+        throw new Error("PI_ASSISTANT_MESSAGE_INCOMPLETE");
+      const editId = manager.appendContextEdit(target.id, { content: [{ type: "text", text }] });
+      // Refresh the live projection as well as the persisted archive. Raw entries
+      // stay append-only; subsequent restore also applies this context edit.
+      session.agent.state.messages = manager.buildSessionContext().messages;
+      return editId;
+    },
     compact: (instructions: string) => run(() => session.compact(instructions)),
     abort: () => {
       aborted = true;

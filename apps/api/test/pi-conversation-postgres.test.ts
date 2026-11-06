@@ -2,7 +2,10 @@ import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import {
+  type FauxResponseFactory,
+  type FauxResponseStep,
   InMemoryCredentialStore,
+  type TranscriptContext,
   fauxAssistantMessage,
   fauxProvider,
   fauxToolCall,
@@ -33,6 +36,44 @@ const final = (reply: string) =>
       new_information_note: null,
     }),
   );
+
+function reviewPayload(context: TranscriptContext): { candidate_reply: string } | undefined {
+  const message = context.messages.filter((message) => message.role === "user").at(-1);
+  if (!message) return undefined;
+  const text =
+    typeof message.content === "string"
+      ? message.content
+      : message.content
+          .filter((part) => part.type === "text")
+          .map((part) => part.text)
+          .join("");
+  try {
+    const parsed = JSON.parse(text);
+    return typeof parsed.candidate_reply === "string" ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function responses(
+  f: Awaited<ReturnType<typeof fixture>>,
+  steps: FauxResponseStep[],
+  review?: (candidate: string) => string,
+) {
+  const remaining = [...steps];
+  const dispatch: FauxResponseFactory = async (context, controls, state, model) => {
+    const payload = reviewPayload(context);
+    if (payload)
+      return fauxAssistantMessage(
+        review ? review(payload.candidate_reply) : payload.candidate_reply,
+      );
+    const step = remaining.shift();
+    if (!step) throw new Error("unscripted primary response");
+    return typeof step === "function" ? step(context, controls, state, model) : step;
+  };
+  // One bounded review follows each primary final; tool rounds consume the same queue.
+  f.provider.setResponses(Array.from({ length: steps.length * 2 + 2 }, () => dispatch));
+}
 
 async function fixture(limit = 3, piSynchronousWaitMs?: number) {
   const config = JSON.parse(await readFile(process.env.FINDME_ACCOUNT_VERIFY_CONFIG!, "utf8"));
@@ -192,7 +233,7 @@ it("runs real pi tools, persists traces, resumes the same session, replays idemp
     const historical = await conversation(f.db, f.ctx, "合成历史：我选周六活动，因为周日要休息。");
     const thread = await conversation(f.db, f.ctx, "请查合成历史，看看我以前为什么选周六活动。");
     let firstToolContext = "";
-    f.provider.setResponses([
+    responses(f, [
       fauxAssistantMessage(
         fauxToolCall("search_history", { query: "合成历史" }, { id: "history-search" }),
         { stopReason: "toolUse" },
@@ -227,6 +268,8 @@ it("runs real pi tools, persists traces, resumes the same session, replays idemp
       version: string;
       referenceVersion: string;
     }>;
+    expect(loadedMethods).toHaveLength(5);
+    expect(loadedMethods.some((method) => method.name === "understanding-review")).toBe(true);
     expect(
       loadedMethods.some(
         (method) =>
@@ -238,7 +281,7 @@ it("runs real pi tools, persists traces, resumes the same session, replays idemp
     const traces = await withProfileTransaction(f.db, f.ctx, (tx) =>
       tx.select().from(c.piRequestRecords).where(eq(c.piRequestRecords.conversationId, thread.id)),
     );
-    expect(traces).toHaveLength(2);
+    expect(traces).toHaveLength(3);
     expect(
       traces.every(
         (trace) => trace.status === "completed" && trace.piInput !== null && trace.output !== null,
@@ -252,7 +295,7 @@ it("runs real pi tools, persists traces, resumes the same session, replays idemp
     expect(f.provider.state.callCount).toBe(calls);
     const secondThread = await nextMessage(f, thread.id, 2, "刚才为什么这么说？");
     let resumed = "";
-    f.provider.setResponses([
+    responses(f, [
       (context) => {
         resumed = JSON.stringify(context);
         return final("因为你之前提到周日要休息。");
@@ -283,7 +326,7 @@ it("runs real pi tools, persists traces, resumes the same session, replays idemp
       "现在只按这个会话里能用的材料回答。",
     );
     let rebuilt = "";
-    f.provider.setResponses([
+    responses(f, [
       (context) => {
         rebuilt = JSON.stringify(context);
         return final("当前材料不足以确认旧活动原因。");
@@ -331,7 +374,7 @@ it("propagates A source exclusion through B conversation reads into C archives a
     const a = await conversation(f.db, f.ctx, "A_PRIVATE_REASON：周日休息");
     const b = await conversation(f.db, f.ctx, "查看A的历史原因");
     const bKey = randomUUID();
-    f.provider.setResponses([
+    responses(f, [
       fauxAssistantMessage(fauxToolCall("read_source", { id: a.sourceId }, { id: "read-a" }), {
         stopReason: "toolUse",
       }),
@@ -342,7 +385,7 @@ it("propagates A source exclusion through B conversation reads into C archives a
     const cKey = randomUUID();
     let expanded = "";
     let defaultExpanded = "";
-    f.provider.setResponses([
+    responses(f, [
       fauxAssistantMessage(
         fauxToolCall("read_conversation", { id: b.id }, { id: "read-b-default" }),
         {
@@ -369,7 +412,7 @@ it("propagates A source exclusion through B conversation reads into C archives a
     expect(defaultExpanded).not.toContain("B_PRIVATE_DERIVATION");
     expect(expanded).toContain("B_PRIVATE_DERIVATION");
     const unrelated = await conversation(f.db, f.ctx, "独立讨论：今天选择散步");
-    f.provider.setResponses([final("UNRELATED_REPLY_STAYS")]);
+    responses(f, [final("UNRELATED_REPLY_STAYS")]);
     expect((await request(f, unrelated)).status).toBe(201);
     const before = await withProfileTransaction(f.db, f.ctx, (tx) =>
       tx.select().from(c.piSessionArchives),
@@ -448,11 +491,11 @@ it("propagates A source exclusion through B conversation reads into C archives a
         (await tx.select().from(c.explorations).where(eq(c.explorations.id, cThread.id)))[0]
           ?.version ?? 0,
     );
-    f.provider.setResponses([final("重新核对后，只能承接仍有效的本人表达。")]);
+    responses(f, [final("重新核对后，只能承接仍有效的本人表达。")]);
     const reanswered = await request(f, { ...cThread, version: repairedVersion });
     expect(reanswered.status).toBe(201);
     expect((await reanswered.json()).reply).toContain("仍有效");
-    expect(f.provider.state.callCount).toBe(beforeReplay + 1);
+    expect(f.provider.state.callCount).toBe(beforeReplay + 2);
   } finally {
     await f.close();
   }
@@ -478,7 +521,7 @@ it("does not deadlock or publish old evidence when exclusion overlaps a pi final
   try {
     const a = await conversation(f.db, f.ctx, "INTERLEAVED_PRIVATE_REASON");
     const b = await conversation(f.db, f.ctx, "查历史再回答");
-    f.provider.setResponses([
+    responses(f, [
       fauxAssistantMessage(fauxToolCall("read_source", { id: a.sourceId }, { id: "read-race" }), {
         stopReason: "toolUse",
       }),
@@ -545,7 +588,7 @@ it("returns 202 while pi continues, replays processing without charging again, a
   let operationId = "";
   try {
     const thread = await conversation(f.db, f.ctx, "合成后台处理输入");
-    f.provider.setResponses([
+    responses(f, [
       async () => {
         reachedModel.resolve();
         await allowModel.promise;
@@ -579,7 +622,7 @@ it("returns 202 while pi continues, replays processing without charging again, a
         status: "completed",
         response: { engine: "pi", reply: "合成后台回应已完成" },
       });
-    expect(f.provider.state.callCount).toBe(before);
+    expect(f.provider.state.callCount).toBe(before + 1);
     expect((await (await f.app.request("/api/core/model-status")).json()).operations_used).toBe(1);
   } finally {
     f.setContext(f.ctx);
@@ -593,6 +636,36 @@ it("returns 202 while pi continues, replays processing without charging again, a
           { timeout: 10000, interval: 10 },
         )
         .not.toBe("processing");
+    await f.close();
+  }
+});
+
+it("delivers the evidence-reviewed wording and resumes without the unsupported payment draft", async () => {
+  const f = await fixture();
+  try {
+    const thread = await conversation(f.db, f.ctx, "我只是报了名，还没有付款。");
+    responses(f, [fauxAssistantMessage("你已经付费，说明你已投入实际成本。")], (candidate) => {
+      expect(candidate).toContain("已经付费");
+      return "你目前只是报名，还没有付款，不能据此认定已经投入金钱成本。";
+    });
+    const first = await request(f, thread);
+    expect(first.status).toBe(201);
+    const accepted = await first.json();
+    expect(accepted.reply).toContain("只是报名");
+    expect(accepted.reply).not.toContain("已经付费");
+    const next = await nextMessage(f, thread.id, accepted.version, "那接着聊吧。");
+    let restoredContext = "";
+    responses(f, [
+      (context) => {
+        restoredContext = JSON.stringify(context);
+        return final("我们接着讨论报名这件事。");
+      },
+    ]);
+    expect((await request(f, next)).status).toBe(201);
+    expect(restoredContext).toContain("只是报名");
+    expect(restoredContext).not.toContain("你已经付费");
+    expect(restoredContext).not.toContain("说明你已投入实际成本");
+  } finally {
     await f.close();
   }
 });

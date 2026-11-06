@@ -767,9 +767,9 @@ export function ConversationView({ resumeId }: { resumeId?: string | null } = {}
             </div>
           )}
 
-          {!!step.data.view?.pending?.updates?.length && (
+          {step.data.view?.turns?.some((turn) => turn.role === "user" && turn.content.trim()) && (
             <div className="conversation-saved">
-              <p>补充内容已保存在对话里，尚未单独整理为认识；可以继续聊，也可以按需更新。</p>
+              <p>可以继续聊；需要时，也可以根据这段对话更新认识。</p>
               <button
                 type="button"
                 className="button secondary"

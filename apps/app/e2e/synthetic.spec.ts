@@ -796,11 +796,11 @@ test("a correction still being processed is not reported as done", async ({ page
   expect(keys[1]).toBe(keys[0]);
 });
 
-for (const delivery of ["direct", "queued", "queued-switch"]) {
+for (const delivery of ["direct", "direct-no-update", "queued", "queued-switch"]) {
   test(`new facts remain in chat until understanding is explicitly updated (${delivery})`, async ({
     page,
   }) => {
-    const deferred = delivery !== "direct";
+    const deferred = delivery.startsWith("queued");
     let refreshWaiting = false;
     let releaseRefresh = () => {};
     const refreshGate = new Promise<void>((resolve) => {
@@ -879,7 +879,11 @@ for (const delivery of ["direct", "queued", "queued-switch"]) {
                 },
               ]
             : [],
-          pending: { corrections: [], messages: [], updates: replied ? [{ source_id: "m1" }] : [] },
+          pending: {
+            corrections: [],
+            messages: [],
+            updates: replied && delivery !== "direct-no-update" ? [{ source_id: "m1" }] : [],
+          },
           understanding: { outcome: "provisional", claims: [claim], gaps: [], needs_review: [] },
         }).then(() => true);
       }
@@ -906,8 +910,8 @@ for (const delivery of ["direct", "queued", "queued-switch"]) {
             exploration_id: "e5",
             version: 4,
             reply: "合成回应：接住进展。",
-            new_information: true,
-            new_information_note: "进展",
+            new_information: delivery !== "direct-no-update",
+            new_information_note: delivery !== "direct-no-update" ? "进展" : null,
           },
           201,
         ).then(() => true);
@@ -963,9 +967,7 @@ for (const delivery of ["direct", "queued", "queued-switch"]) {
     await expect(page.getByText("合成回应：接住进展。")).toBeVisible();
     await expect(page.getByLabel("接着说")).toBeEnabled();
     await expect(page.getByText("这次进展改变了什么？")).toHaveCount(0);
-    await expect(
-      page.getByText("补充内容已保存在对话里，尚未单独整理为认识；可以继续聊，也可以按需更新。"),
-    ).toBeVisible();
+    await expect(page.getByText("可以继续聊；需要时，也可以根据这段对话更新认识。")).toBeVisible();
     expect(continued).toBe(0);
     expect(replyPosts).toBe(1);
     if (deferred) expect(polls).toBe(2);

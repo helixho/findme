@@ -276,4 +276,26 @@ describe("FindMe pi sessions", () => {
     expect(session.requestCount()).toBe(2);
     session.dispose();
   });
+  it("keeps the original draft archived but restores only the accepted reply into model context", async () => {
+    const f = await fixture();
+    f.provider.setResponses([
+      fauxAssistantMessage("UNACCEPTED_DRAFT"),
+      fauxAssistantMessage("next reply"),
+    ]);
+    const first = await createFindMePiSession(f.options);
+    expect(await first.prompt("synthetic")).toBe("UNACCEPTED_DRAFT");
+    first.reviseLastAssistant("ACCEPTED_REPLY");
+    const archive = first.snapshot();
+    expect(JSON.stringify(archive.entries)).toContain("UNACCEPTED_DRAFT");
+    expect(archive.entries.some((entry) => entry.type === "context_edit")).toBe(true);
+    first.dispose();
+    const second = await createFindMePiSession({ ...f.options, archive });
+    expect(await second.prompt("continue")).toBe("next reply");
+    const input = JSON.stringify(
+      f.records.filter((record) => record.output === undefined).at(-1)?.input,
+    );
+    expect(input).toContain("ACCEPTED_REPLY");
+    expect(input).not.toContain("UNACCEPTED_DRAFT");
+    second.dispose();
+  });
 });

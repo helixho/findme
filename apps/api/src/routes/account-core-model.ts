@@ -18,7 +18,7 @@ import {
   getCoreOperation,
   markCoreOperationFailed,
 } from "../core/operations.js";
-import type { PiReplyHandler } from "../personal-understanding/pi-conversation.js";
+import { PI_REPLY_LIMITS, type PiReplyHandler } from "../personal-understanding/pi-conversation.js";
 
 /**
  * Account-mode Core operations that call the model. Owner decision (2026-10-31):
@@ -140,7 +140,9 @@ export function accountCoreModelRoutes(options: AccountCoreModelOptions) {
       window_hours: CORE_MODEL_WINDOW_MS / 3_600_000,
       operation_limit: dailyOperationLimit,
       operations_used: used,
-      max_calls_per_operation: CORE_MODEL_MAX_CALLS_PER_OPERATION,
+      max_calls_per_operation: options.piReply
+        ? PI_REPLY_LIMITS.maxRequests
+        : CORE_MODEL_MAX_CALLS_PER_OPERATION,
     });
   });
 
