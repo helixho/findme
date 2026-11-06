@@ -65,7 +65,7 @@ export function decodePiReview(
     );
     const segments = reviewSegments(candidate);
     const seen = new Set<string>();
-    const applied = parsed.edits.map((edit) => {
+    const requested = parsed.edits.map((edit) => {
       const target = segments.find((segment) => segment.id === edit.target_id);
       if (!target || seen.has(edit.target_id)) throw new Error("unknown or repeated target");
       seen.add(edit.target_id);
@@ -89,6 +89,26 @@ export function decodePiReview(
         basis: edit.basis,
       };
     });
+    // Adjacent edits can cancel each other (for example, copy the next sentence
+    // into this one and delete it). Keep the model proposal in its raw record,
+    // but do not report a net-identical region as a change to the delivered text.
+    const groups: Array<typeof requested> = [];
+    for (const edit of [...requested].sort((a, b) => a.start - b.start)) {
+      const last = groups.at(-1);
+      if (last?.at(-1)?.end === edit.start) last.push(edit);
+      else groups.push([edit]);
+    }
+    const discarded = groups.filter((group) => {
+      const first = group[0];
+      const last = group.at(-1);
+      return (
+        first &&
+        last &&
+        candidate.slice(first.start, last.end) === group.map((edit) => edit.after).join("")
+      );
+    });
+    const discardedIds = new Set(discarded.flatMap((group) => group.map((edit) => edit.target_id)));
+    const applied = requested.filter((edit) => !discardedIds.has(edit.target_id));
     let reply = candidate;
     for (const edit of [...applied].sort((a, b) => b.start - a.start))
       reply = reply.slice(0, edit.start) + edit.after + reply.slice(edit.end);
@@ -101,6 +121,7 @@ export function decodePiReview(
         candidate_sha256: fingerprint(candidate),
         result_sha256: fingerprint(reply),
         applied_edits: applied,
+        discarded_no_effect_targets: [...discardedIds],
       },
     };
   } catch {

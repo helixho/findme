@@ -21,7 +21,7 @@ export function jsonObject(value: Record<string, unknown>) {
 export function deriveExplorationPhase(args: {
   status: string;
   openQuestion: unknown;
-  claims: Array<{ evidenceStatus: string }>;
+  claims: Array<{ evidenceStatus: string; pendingFeedback?: boolean }>;
   gaps: unknown[];
   hasWithdrawn?: boolean;
   /** Latest step is a completed synthesis that changed prior understanding only. */
@@ -29,7 +29,8 @@ export function deriveExplorationPhase(args: {
 }) {
   if (args.status !== "active") return "completed";
   if (args.openQuestion) return "awaiting_answer";
-  if (args.claims.some((claim) => claim.evidenceStatus !== "valid")) return "needs_review";
+  if (args.claims.some((claim) => claim.evidenceStatus !== "valid" || claim.pendingFeedback))
+    return "needs_review";
   if (args.claims.some((claim) => claim.evidenceStatus === "valid")) return "review";
   if (args.hasWithdrawn) return "review";
   if (args.priorProcessed) return "review";

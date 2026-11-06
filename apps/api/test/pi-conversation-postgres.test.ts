@@ -18,6 +18,7 @@ import { expect, it } from "vitest";
 import { ProfileService } from "../src/auth/profiles.js";
 import { invalidateCloudSources } from "../src/cloud-diagnostic/effects.js";
 import { lockPiProfileState, withProfileTransaction } from "../src/cloud-diagnostic/scope.js";
+import { withdrawClaimByOwner } from "../src/core/conversation.js";
 import type { PersonalContext } from "../src/core/exploration-types.js";
 import type { CoreGateway } from "../src/core/llm.js";
 import { onError } from "../src/middleware/error.js";
@@ -820,14 +821,14 @@ it("unwraps stored pi reply envelopes on rebuild without rewriting the stored tu
     let history: Array<{ role: string; content: string }> = [];
     responses(f, [
       (context) => {
-        const text = context.messages
+        const texts = context.messages
           .flatMap((m) =>
             typeof m.content === "string"
               ? [m.content]
               : m.content.filter((p) => p.type === "text").map((p) => p.text),
           )
-          .find((t) => t.includes("以下是本会话有效历史资料"));
-        if (text) history = JSON.parse(text.slice(text.indexOf("\n") + 1));
+          .filter((t) => t.startsWith("以下是本会话有效历史资料"));
+        history = texts.flatMap((text) => JSON.parse(text.slice(text.indexOf("\n") + 1)));
         return final("new answer");
       },
     ]);
@@ -1054,6 +1055,343 @@ it("applies the target-message time boundary to tool reads from another conversa
     expect((await request(f, thread)).status).toBe(201);
     expect(actualInput).not.toContain("CROSS_CONVERSATION_FUTURE_CONTENT_MUST_NOT_LEAK");
     expect(actualInput).toContain("SOURCE_NOT_AVAILABLE");
+  } finally {
+    await f.close();
+  }
+});
+
+async function seedExplicitDefaultPreference(f: Awaited<ReturnType<typeof fixture>>) {
+  const text = "以后所有对话请先说明参考材料的适用范围。";
+  const owner = await conversation(f.db, f.ctx, text);
+  const revisionId = await withProfileTransaction(f.db, f.ctx, async (tx) => {
+    const [span] = await tx
+      .insert(c.evidenceSpans)
+      .values({
+        sourceItemId: owner.sourceId,
+        quote: text,
+        locator: { start: 0, end: text.length },
+        authorKind: "subject",
+        aboutSubject: true,
+      })
+      .returning();
+    const [claim] = await tx
+      .insert(c.claims)
+      .values({
+        ...f.ctx,
+        claimKey: `${owner.id}/explicit-preference`,
+        claimKind: "value",
+      })
+      .returning();
+    const [revision] = await tx
+      .insert(c.claimRevisions)
+      .values({
+        claimId: claim!.id,
+        version: 1,
+        mode: "self_report",
+        status: "current",
+        evidenceStatus: "valid",
+        text: "参考材料应先说明适用范围（SCOPED_PREFERENCE_INDEX_MARKER）",
+        scope: "本人明确要求的长期对话呈现方式",
+        confidenceLevel: "high",
+        confidenceBasis: "本人明确自述；非人格判断",
+        details: {
+          interaction_preference: {
+            explicit: true,
+            source_id: owner.sourceId,
+            source_assessment_version: 1,
+            original_text: text,
+            scope: { kind: "default", explicitlyLongTerm: true },
+            scope_quote: text,
+          },
+        },
+      })
+      .returning();
+    await tx.insert(c.claimEvidence).values({
+      claimRevisionId: revision!.id,
+      evidenceSpanId: span!.id,
+      relation: "supports",
+      directness: "direct",
+      contribution: "high",
+      independenceGroup: owner.sourceId,
+      scopeMatch: "exact",
+      rationale: "明确本人原话",
+    });
+    return revision!.id;
+  });
+  return { owner, revisionId, text };
+}
+
+it("assembles an eligible explicit default preference and related knowledge before the first pi request", async () => {
+  const f = await fixture();
+  try {
+    const preference = await seedExplicitDefaultPreference(f);
+    const thread = await conversation(f.db, f.ctx, "请谈参考材料的适用范围。");
+    let modelInput = "";
+    let systemInput = "";
+    responses(f, [
+      (context) => {
+        modelInput = JSON.stringify(context);
+        systemInput = JSON.stringify(
+          context.messages.filter((message) => message.role === "system"),
+        );
+        return final("先确认这段参考材料适用于什么范围。");
+      },
+    ]);
+    const response = await request(f, thread);
+    expect(response.status).toBe(201);
+    expect(modelInput).toContain(preference.text);
+    expect(systemInput).not.toContain(preference.text);
+    expect(systemInput).not.toContain("SCOPED_PREFERENCE_INDEX_MARKER");
+    expect(modelInput).toContain("SCOPED_PREFERENCE_INDEX_MARKER");
+    expect(modelInput).toContain(preference.revisionId);
+    await withProfileTransaction(f.db, f.ctx, async (tx) => {
+      const [source] = await tx
+        .select()
+        .from(c.sourceItems)
+        .where(eq(c.sourceItems.id, thread.sourceId));
+      const reply = source?.sourceMeta?.reply as {
+        source_ids?: string[];
+        revision_dependencies?: Array<{ revisionId: string; fingerprint: string }>;
+        context_fingerprint?: string;
+      };
+      expect(reply.source_ids).toContain(preference.owner.sourceId);
+      expect(reply.revision_dependencies).toContainEqual(
+        expect.objectContaining({ revisionId: preference.revisionId }),
+      );
+      expect(reply.context_fingerprint).toMatch(/^[a-f0-9]{64}$/);
+      const rows = await tx
+        .select()
+        .from(c.piSessionArchives)
+        .where(eq(c.piSessionArchives.conversationId, thread.id));
+      const archive = rows.sort((a, b) => b.revision - a.revision)[0]?.archive;
+      expect(archive?.complete).toBe(true);
+      expect(archive?.revision_dependencies).toContainEqual(
+        expect.objectContaining({ revisionId: preference.revisionId }),
+      );
+      expect(archive?.contextFingerprint).toBe(reply.context_fingerprint);
+    });
+  } finally {
+    await f.close();
+  }
+});
+
+it("rebuilds a source-valid conversation after actual withdrawal and omits its prior preference and derived reply", async () => {
+  const f = await fixture();
+  try {
+    const preference = await seedExplicitDefaultPreference(f);
+    const thread = await conversation(f.db, f.ctx, "请谈参考材料的适用范围。");
+    responses(f, [final("REPLY_DERIVED_FROM_SCOPED_PREFERENCE")]);
+    const first = await request(f, thread);
+    expect(first.status).toBe(201);
+    const accepted = await first.json();
+    await withProfileTransaction(f.db, f.ctx, async (tx) => {
+      await lockPiProfileState(tx, f.ctx);
+      const result = await withdrawClaimByOwner(tx as unknown as typeof f.db, f.ctx, {
+        claim_revision_id: preference.revisionId,
+      });
+      expect(result.status).toBe("withdrawn");
+      const [source] = await tx
+        .select()
+        .from(c.sourceItems)
+        .where(eq(c.sourceItems.id, preference.owner.sourceId));
+      expect(source?.usageStatus).toBe("active");
+      const [revision] = await tx
+        .select()
+        .from(c.claimRevisions)
+        .where(eq(c.claimRevisions.id, preference.revisionId));
+      expect(revision?.status).toBe("superseded");
+    });
+    const next = await nextMessage(f, thread.id, accepted.version, "继续这段讨论。");
+    let modelInput = "";
+    responses(f, [
+      (context) => {
+        modelInput = JSON.stringify(context);
+        return final("仅根据当前可用内容继续。");
+      },
+    ]);
+    const response = await request(f, next);
+    expect(response.status).toBe(201);
+    expect(modelInput).not.toContain(preference.text);
+    expect(modelInput).not.toContain("SCOPED_PREFERENCE_INDEX_MARKER");
+    expect(modelInput).not.toContain("REPLY_DERIVED_FROM_SCOPED_PREFERENCE");
+    expect(modelInput).not.toContain(preference.revisionId);
+    expect(modelInput).toContain("继续这段讨论");
+    await withProfileTransaction(f.db, f.ctx, async (tx) => {
+      const [source] = await tx
+        .select()
+        .from(c.sourceItems)
+        .where(eq(c.sourceItems.id, next.sourceId));
+      const reply = source?.sourceMeta?.reply as {
+        revision_dependencies?: Array<{ revisionId: string }>;
+      };
+      expect(reply.revision_dependencies?.some((d) => d.revisionId === preference.revisionId)).toBe(
+        false,
+      );
+    });
+  } finally {
+    await f.close();
+  }
+});
+
+it("resumes a prepared compaction checkpoint after a primary failure without summarizing again", async () => {
+  const f = await fixture();
+  try {
+    let thread = await conversation(
+      f.db,
+      f.ctx,
+      `HISTORY_0_BEGIN${"合".repeat(3900)}HISTORY_0_END`,
+    );
+    for (let i = 1; i < 6; i++)
+      thread = await nextMessage(
+        f,
+        thread.id,
+        thread.version,
+        `HISTORY_${i}_BEGIN${"合".repeat(3900)}HISTORY_${i}_END`,
+      );
+    const target = await nextMessage(f, thread.id, thread.version, "当前短消息：接着聊这一件事。");
+    let summaries = 0;
+    responses(f, [
+      (context) => {
+        summaries++;
+        expect(JSON.stringify(context)).toContain("historical_conversation_material");
+        return fauxAssistantMessage("SUMMARY_OF_OLDER_TURNS：仅整理先前记录，未作个人推断。");
+      },
+      fauxAssistantMessage("", {
+        stopReason: "error",
+        errorMessage: "synthetic primary request failure",
+      }),
+    ]);
+    expect((await request(f, target)).status).toBe(502);
+    await withProfileTransaction(f.db, f.ctx, async (tx) => {
+      const rows = await tx
+        .select()
+        .from(c.piSessionArchives)
+        .where(eq(c.piSessionArchives.conversationId, thread.id));
+      const prepared = rows.sort((a, b) => b.revision - a.revision)[0]?.archive;
+      expect(prepared?.phase).toBe("prepared");
+      expect(prepared?.complete).toBe(false);
+      expect(prepared?.contextVersion).toBe(target.version);
+      expect(prepared?.pendingMessageId).toBe(target.sourceId);
+      const [source] = await tx
+        .select()
+        .from(c.sourceItems)
+        .where(eq(c.sourceItems.id, target.sourceId));
+      expect(source?.sourceMeta?.reply_status).toBe("pending");
+    });
+    let resumedInput = "";
+    let primaryRequests = 0;
+    responses(f, [
+      (context) => {
+        primaryRequests++;
+        resumedInput = JSON.stringify(context);
+        expect(resumedInput).toContain("当前短消息");
+        return final("已从有效压缩检查点接着交流。");
+      },
+    ]);
+    const response = await request(f, target, randomUUID());
+    expect(response.status).toBe(201);
+    expect(summaries).toBe(1);
+    expect(primaryRequests).toBe(1);
+    expect(resumedInput).toContain("SUMMARY_OF_OLDER_TURNS");
+    expect(resumedInput).toContain("HISTORY_4_BEGIN");
+    expect(resumedInput).toContain("HISTORY_5_BEGIN");
+    expect(resumedInput).not.toContain("HISTORY_0_BEGIN");
+    await withProfileTransaction(f.db, f.ctx, async (tx) => {
+      const rows = await tx
+        .select()
+        .from(c.piSessionArchives)
+        .where(eq(c.piSessionArchives.conversationId, thread.id));
+      expect(rows.sort((a, b) => b.revision - a.revision)[0]?.archive?.complete).toBe(true);
+      const traces = await tx
+        .select()
+        .from(c.piRequestRecords)
+        .where(eq(c.piRequestRecords.conversationId, thread.id));
+      expect(traces).toHaveLength(4); // summary + failed primary, then primary + reviewer
+    });
+  } finally {
+    await f.close();
+  }
+});
+
+it("does not report cancelling adjacent edits as changes to the delivered text", () => {
+  const candidate = "第一句话。第二句话。";
+  const result = decodePiReview(
+    JSON.stringify({
+      edits: [
+        {
+          target_id: "b1",
+          operation: "replace",
+          replacement: candidate,
+          reason: "合并",
+          basis: { kind: "evidence" },
+        },
+        { target_id: "b2", operation: "delete", reason: "已合并", basis: { kind: "evidence" } },
+      ],
+    }),
+    candidate,
+  );
+  expect(result.reply).toBe(candidate);
+  expect(result.audit.applied_edits).toEqual([]);
+  expect(result.audit.discarded_no_effect_targets).toEqual(["b1", "b2"]);
+  expect(result.audit.candidate_sha256).toBe(result.audit.result_sha256);
+});
+
+it("does not revive a legacy reply's withdrawn knowledge in the pi conversation", async () => {
+  const f = await fixture();
+  try {
+    const preference = await seedExplicitDefaultPreference(f);
+    const legacy = await conversation(f.db, f.ctx, "较早的普通对话");
+    await withProfileTransaction(f.db, f.ctx, async (tx) => {
+      const [turn] = await tx
+        .insert(c.explorationTurns)
+        .values({
+          explorationId: legacy.id,
+          role: "assistant",
+          turnKind: "reply",
+          content: "LEGACY_REPLY_FROM_WITHDRAWABLE_KNOWLEDGE",
+        })
+        .returning();
+      if (!turn) throw new Error("fixture missing");
+      await tx
+        .update(c.sourceItems)
+        .set({
+          sourceMeta: {
+            exploration_id: legacy.id,
+            reply_status: "replied",
+            reply: { turn_id: turn.id, offered_claim_revision_ids: [preference.revisionId] },
+          },
+        })
+        .where(eq(c.sourceItems.id, legacy.sourceId));
+    });
+    const next = await nextMessage(f, legacy.id, legacy.version, "继续谈参考材料");
+    let before = "";
+    responses(f, [
+      (context) => {
+        before = JSON.stringify(context);
+        return final("继续当前讨论");
+      },
+    ]);
+    const first = await request(f, next);
+    expect(first.status).toBe(201);
+    const accepted = await first.json();
+    expect(before).toContain("LEGACY_REPLY_FROM_WITHDRAWABLE_KNOWLEDGE");
+    await withProfileTransaction(f.db, f.ctx, async (tx) => {
+      await lockPiProfileState(tx, f.ctx);
+      await withdrawClaimByOwner(tx as unknown as typeof f.db, f.ctx, {
+        claim_revision_id: preference.revisionId,
+      });
+    });
+    const afterInput = await nextMessage(f, legacy.id, accepted.version, "现在再继续");
+    let after = "";
+    responses(f, [
+      (context) => {
+        after = JSON.stringify(context);
+        return final("仅用当前可用材料");
+      },
+    ]);
+    expect((await request(f, afterInput)).status).toBe(201);
+    expect(after).not.toContain("LEGACY_REPLY_FROM_WITHDRAWABLE_KNOWLEDGE");
+    expect(after).not.toContain(preference.text);
   } finally {
     await f.close();
   }

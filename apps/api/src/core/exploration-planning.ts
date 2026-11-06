@@ -167,6 +167,7 @@ async function generateAndCommitContinue(
         text: claim.text,
         scope: claim.scope,
         evidence_status: claim.evidenceStatus,
+        pending_feedback: claim.pendingFeedback,
       })),
       questions: questions.map((question) => ({
         sequence: question.sequence,
@@ -347,7 +348,7 @@ async function generateAndCommitContinue(
       "EVIDENCE:",
       evidenceText(rows),
       "",
-      "CURRENT_CLAIMS (context only; reuse key for the same understanding):",
+      "CURRENT_CLAIMS (context only; reuse key for the same understanding; pending_feedback means a user objection requires reassessment, not an accepted premise):",
       JSON.stringify(
         claims.map((claim) => ({
           key: claim.key,
@@ -356,6 +357,7 @@ async function generateAndCommitContinue(
           text: claim.text,
           scope: claim.scope,
           evidence_status: claim.evidenceStatus,
+          pending_feedback: claim.pendingFeedback,
         })),
       ),
     ].join("\n") + priorContextText(prior);

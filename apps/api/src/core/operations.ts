@@ -191,11 +191,20 @@ export async function getCoreOperation(db: Db, ctx: PersonalContext, operationId
  * must take this lock first to keep a single lock order.
  */
 export async function lockCoreOperation(db: Pick<Db, "select">, operationId: string) {
-  await db
-    .select({ id: coreSchema.coreOperations.id })
+  const [operation] = await db
+    .select({
+      id: coreSchema.coreOperations.id,
+      status: coreSchema.coreOperations.status,
+      responseBody: coreSchema.coreOperations.responseBody,
+    })
     .from(coreSchema.coreOperations)
     .where(eq(coreSchema.coreOperations.id, operationId))
     .for("update");
+  if (
+    operation?.status === "failed" &&
+    (operation.responseBody?.error as { code?: string } | undefined)?.code === "PI_USER_ABORTED"
+  )
+    throw new CoreError("PI_USER_ABORTED", 409, "本轮已停止，输入已保存");
 }
 
 /** Extend only an existing active reservation; never creates or retries a paid operation. */

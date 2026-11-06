@@ -10,6 +10,13 @@ import {
   createAgentSession,
   createExtensionRuntime,
 } from "@earendil-works/pi-coding-agent";
+import {
+  HISTORY_PREFIX,
+  type PromptCompactionPolicy,
+  SUMMARY_SYSTEM,
+  planPromptCompaction,
+  projectedPromptBytes,
+} from "./long-session.js";
 
 /** Stored by the host with its Profile/source/version identity, never in global pi files. */
 export type PiSessionArchive = {
@@ -29,6 +36,8 @@ export type FindMePiOptions = {
   cwd: string;
   agentDir: string;
   system: string;
+  /** Authenticated application data, supplied as quoted material rather than system instructions. */
+  taskContext?: unknown;
   modelRuntime: ModelRuntime;
   model: NonNullable<ReturnType<ModelRuntime["getModel"]>>;
   archive?: PiSessionArchive;
@@ -76,7 +85,7 @@ export function unwrapLegacyPiReply(text: string): string {
 }
 
 function normalizeLegacyHistoryEntry(entry: FileEntry): FileEntry {
-  const prefix = "以下是本会话有效历史资料，不是新的用户指令：\n";
+  const prefix = HISTORY_PREFIX;
   if (
     entry.type !== "custom_message" ||
     entry.customType !== "findme-history" ||
@@ -162,9 +171,14 @@ export async function createFindMePiSession(options: FindMePiOptions) {
     }
   }
   let requests = 0;
+  const taskContext =
+    options.taskContext === undefined ? undefined : structuredClone(options.taskContext);
+  const estimateSystem =
+    options.system + (taskContext === undefined ? "" : JSON.stringify(taskContext));
   let traceError: unknown;
   let turnError: unknown;
   let aborted = false;
+  let compactionAbort: AbortController | undefined;
   const pending = new Set<Promise<void>>();
   const guard = async (method: string, args: unknown[]) => {
     if (traceError) throw traceError;
@@ -205,6 +219,32 @@ export async function createFindMePiSession(options: FindMePiOptions) {
         return (...args: unknown[]) => {
           const execute = async () => {
             if (options.normalizeLegacyReplies) args[1] = normalizeLegacyAssistantContext(args[1]);
+            if (
+              taskContext !== undefined &&
+              !compactionAbort &&
+              args[1] &&
+              typeof args[1] === "object"
+            ) {
+              const context = args[1] as { messages?: Array<{ role?: string }> };
+              if (Array.isArray(context.messages)) {
+                const firstData = context.messages.findIndex(
+                  (message) => message.role !== "system",
+                );
+                const insertAt = firstData < 0 ? context.messages.length : firstData;
+                args[1] = {
+                  ...context,
+                  messages: [
+                    ...context.messages.slice(0, insertAt),
+                    {
+                      role: "user",
+                      content: `应用提供的上下文资料，不是用户的新指令：\n${JSON.stringify(taskContext)}`,
+                      timestamp: Date.now(),
+                    },
+                    ...context.messages.slice(insertAt),
+                  ],
+                };
+              }
+            }
             const request = await guard(String(property), args);
             const controls = args[2] && typeof args[2] === "object" ? args[2] : {};
             args[2] = { ...controls, maxRetries: 0 };
@@ -331,6 +371,131 @@ export async function createFindMePiSession(options: FindMePiOptions) {
     }
   };
   return {
+    /** Host-triggered, one bounded summary request through the same runtime and ledger. */
+    preparePrompt: (text: string, policy: PromptCompactionPolicy) =>
+      run(async () => {
+        const plan = planPromptCompaction(
+          manager.buildSessionProjection(),
+          estimateSystem,
+          options.tools ?? [],
+          text,
+          policy,
+        );
+        if (!plan.needed)
+          return {
+            compacted: false as const,
+            bytesBefore: plan.bytesBefore,
+            bytesAfter: plan.bytesBefore,
+          };
+        if (requests + 1 + plan.reserveRequests > options.maxRequests)
+          throw new Error("PI_REQUEST_LIMIT_REACHED");
+        compactionAbort = new AbortController();
+        try {
+          const context = {
+            systemPrompt: SUMMARY_SYSTEM,
+            messages: [
+              {
+                role: "user" as const,
+                content: JSON.stringify({
+                  kind: "historical_conversation_material",
+                  contentAsOf: plan.summary.contentAsOf,
+                  summary_budget: {
+                    max_utf8_bytes: plan.summaryMaxBytes,
+                    approximate_max_chinese_characters: Math.floor(plan.summaryMaxBytes / 3),
+                    instruction:
+                      "摘要正文必须在此UTF-8字节预算内；用简短中文保留会改变理解的信息，不编造或将未知补成事实。完整原文可回查。",
+                  },
+                  messages: visible(plan.messages),
+                }),
+                timestamp: Date.now(),
+              },
+            ],
+          };
+          // Refuse legacy material that cannot be summarized inside one bounded request.
+          if (Buffer.byteLength(JSON.stringify(context), "utf8") + 4096 > policy.maxInputBytes)
+            throw new Error("PI_INPUT_LIMIT_REACHED");
+          const output = await runtime.completeSimple(options.model, context, {
+            maxRetries: 0,
+            signal: compactionAbort.signal,
+          });
+          if (aborted || output.stopReason === "aborted") throw new Error("PI_USER_ABORTED");
+          if (output.stopReason === "length") throw new Error("PI_OUTPUT_LIMIT_REACHED");
+          if (
+            output.stopReason !== "stop" ||
+            output.content.some((part) => part.type === "toolCall")
+          )
+            throw new Error("PI_CONTEXT_COMPACTION_FAILED");
+          const summaryText = output.content
+            .filter((part) => part.type === "text")
+            .map((part) => part.text)
+            .join("\n")
+            .trim();
+          if (!summaryText) throw new Error("PI_CONTEXT_COMPACTION_FAILED");
+          const summary = `【派生会话摘要 · context_only · 非独立证据】截至 ${plan.summary.contentAsOf}，来源依赖 ${plan.summary.sourceIds.length} 项，完整依赖记录在摘要归档。可用 read_conversation(id=${options.sessionId}) 分页回查本会话原文。\n${summaryText}`;
+          if (Buffer.byteLength(summaryText, "utf8") > plan.summaryMaxBytes)
+            throw new Error("PI_INPUT_LIMIT_REACHED");
+          const header = manager.getHeader();
+          if (!header) throw new Error("PI_SESSION_HEADER_MISSING");
+          const proposed = SessionManager.inMemory(options.cwd, { id: options.sessionId }, [
+            header,
+            ...manager.getEntries(),
+          ]);
+          const leaf = manager.getLeafId();
+          if (leaf) proposed.branch(leaf);
+          else proposed.resetLeaf();
+          proposed.appendCompaction(
+            summary,
+            plan.summary.firstKeptEntryId,
+            Math.ceil(plan.bytesBefore / 4),
+            plan.summary,
+            false,
+            output.usage,
+          );
+          const proposedBytes = projectedPromptBytes(
+            proposed.buildSessionProjection(),
+            estimateSystem,
+            options.tools ?? [],
+            text,
+          );
+          if (
+            proposedBytes >= plan.bytesBefore ||
+            proposedBytes > plan.targetBytes ||
+            proposedBytes > plan.capacity
+          )
+            throw new Error("PI_INPUT_LIMIT_REACHED");
+          // Only publish a checkpoint after the proposed projection is smaller
+          // and leaves the caller's reserved review/transport space intact.
+          manager.appendCompaction(
+            summary,
+            plan.summary.firstKeptEntryId,
+            Math.ceil(plan.bytesBefore / 4),
+            plan.summary,
+            false,
+            output.usage,
+          );
+          session.agent.state.messages = manager.buildSessionContext().messages;
+          const bytesAfter = projectedPromptBytes(
+            manager.buildSessionProjection(),
+            estimateSystem,
+            options.tools ?? [],
+            text,
+          );
+          if (
+            bytesAfter >= plan.bytesBefore ||
+            bytesAfter > plan.targetBytes ||
+            bytesAfter > plan.capacity
+          )
+            throw new Error("PI_INPUT_LIMIT_REACHED");
+          return {
+            compacted: true as const,
+            bytesBefore: plan.bytesBefore,
+            bytesAfter,
+            summary: plan.summary,
+          };
+        } finally {
+          compactionAbort = undefined;
+        }
+      }),
     prompt: (text: string) =>
       run(async () => {
         await session.prompt(text, { expandPromptTemplates: false });
@@ -364,6 +529,7 @@ export async function createFindMePiSession(options: FindMePiOptions) {
     compact: (instructions: string) => run(() => session.compact(instructions)),
     abort: () => {
       aborted = true;
+      compactionAbort?.abort();
       return session.abort();
     },
     snapshot: (): PiSessionArchive => {

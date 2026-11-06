@@ -16,6 +16,7 @@ export {
   EvidenceRelation,
   EvidenceUse,
   KnowledgeGap,
+  InteractionPreferenceDraft,
   PriorUnderstandingEffect,
   PriorUnderstandingUpdate,
   RevisionDraft,

@@ -35,6 +35,7 @@ import {
   startExploration,
 } from "../core/exploration-service.js";
 import { directCoreStore } from "../core/exploration-types.js";
+import { getReplyMaterials } from "../core/exploration-views.js";
 import { type Principal, resolvePersonalContext } from "../core/identity.js";
 import type { CoreGateway } from "../core/llm.js";
 import {
@@ -453,6 +454,27 @@ export function coreRoutes(
       successStatus: 200,
       execute: (operationId) => completeExploration(db, ctx, input, operationId),
     });
+  });
+
+  r.get("/explorations/:id/replies/:turnId/materials", async (c) => {
+    const ctx = await contextFor(c);
+    const query = z
+      .object({
+        cursor: z.coerce.number().int().nonnegative().optional(),
+        limit: z.coerce.number().int().min(1).max(20).optional(),
+        source_id: z.string().uuid().optional(),
+        start: z.coerce.number().int().nonnegative().optional(),
+      })
+      .parse(c.req.query());
+    return c.json(
+      await getReplyMaterials(
+        db,
+        ctx,
+        z.string().uuid().parse(c.req.param("id")),
+        z.string().uuid().parse(c.req.param("turnId")),
+        { ...query, sourceId: query.source_id },
+      ),
+    );
   });
 
   r.get("/explorations/:id", async (c) => {

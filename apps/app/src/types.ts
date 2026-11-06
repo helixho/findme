@@ -29,6 +29,7 @@ export type ClaimView = {
   text: string;
   scope: string;
   evidence_status?: "valid" | "stale" | "invalid" | string;
+  pending_feedback?: boolean;
   confidence_level: "low" | "medium" | "high" | string;
   confidence_basis: string;
   invalidation_reason?: string | null;
@@ -284,4 +285,25 @@ export type UnderstandingChange = {
   scope: string;
   reason: string | null;
   changed_at: string;
+};
+
+/** Context dependencies read by a reply, not individual attribution claims. */
+export type ReplyMaterial = {
+  source_id: string;
+  author_kind: string;
+  source_kind: string;
+  recorded_at: string;
+  occurred_at: string | null;
+  text: string;
+  start: number;
+  end: number;
+  next_text_offset: number | null;
+};
+export type ReplyMaterialsResponse = {
+  reply_turn_id: string;
+  qualification: "reference_range_not_statement_support";
+  total_sources: number;
+  unavailable_in_page: number;
+  items: ReplyMaterial[];
+  next_cursor: number | null;
 };

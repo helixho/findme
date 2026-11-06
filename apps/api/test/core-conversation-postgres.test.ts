@@ -1,7 +1,10 @@
+import type { ClaimDraft } from "@findme/core";
 import { coreSchema, createDb } from "@findme/db";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { invalidateCloudSources } from "../src/cloud-diagnostic/effects.js";
+import type { EvidenceRow } from "../src/core/exploration-types.js";
+import { validateClaimEvidence } from "../src/core/exploration-validation.js";
 import { resolvePersonalContext } from "../src/core/identity.js";
 import { coreTestApp } from "./helper.js";
 
@@ -66,6 +69,39 @@ const baseExtract: Extract = async (input) => {
     };
   return { claims: [CLAIM], gaps: [], next_question: null };
 };
+
+function preferenceClaim(
+  original: string,
+  key = "E1",
+  scope: NonNullable<ClaimDraft["interaction_preference"]>["scope"] = { kind: "conversation" },
+  scopeQuote?: string,
+): ClaimDraft {
+  return {
+    key: "reply_style",
+    kind: "value",
+    mode: "self_report",
+    text: original,
+    scope: "本人明确表达的交流方式，范围由原话及来源限制。",
+    confidence_level: "high",
+    confidence_basis: "本人明确表达；不作为人格推断。",
+    evidence: [
+      {
+        evidence_key: key,
+        relation: "supports",
+        directness: "direct",
+        contribution: "high",
+        scope_match: "同一偏好表达",
+        rationale: "引用本人原话。",
+      },
+    ],
+    interaction_preference: {
+      evidence_key: key,
+      original_text: original,
+      scope,
+      ...(scopeQuote ? { scope_quote: scopeQuote } : {}),
+    },
+  };
+}
 
 function gatewayOf(extract: Extract) {
   return {
@@ -139,6 +175,232 @@ dbDescribe("Core conversation continuity (AG-07a)", () => {
     expect(done.claims).toHaveLength(1);
     return { id: started.exploration.id as string, done };
   }
+
+  it("persists an explicitly updated interaction preference and corrects its scope with a new source", async () => {
+    let proposal = preferenceClaim(
+      "以后所有对话，请先给简短结论。",
+      "E1",
+      { kind: "default", explicitlyLongTerm: true },
+      "以后所有对话",
+    );
+    const prefApp = coreTestApp({
+      db,
+      gateway: gatewayOf(async (input) => {
+        if ((input.system ?? "").includes("目标不是延长对话")) return baseExtract(input);
+        const result = { claims: [proposal], gaps: [], next_question: null, prior_updates: [] };
+        return (input.system ?? "").includes("认识修订器")
+          ? {
+              ...result,
+              change_summary: "仅在本次对话使用新的表达方式。",
+              revision_reason: "本人收窄了范围。",
+              withdrawn_claim_keys: [],
+            }
+          : result;
+      }),
+    });
+    const started = await ok("/api/core/explorations", { event: proposal.text }, prefApp);
+    const id = started.exploration.id;
+    const done = await ok(
+      `/api/core/explorations/${id}/continue`,
+      { expected_version: started.exploration.version },
+      prefApp,
+    );
+    const [first] = await db
+      .select()
+      .from(coreSchema.claimRevisions)
+      .where(eq(coreSchema.claimRevisions.id, done.claims[0].claim_revision_id));
+    expect(first.details.interaction_preference).toMatchObject({
+      explicit: true,
+      source_id: started.event_source_id,
+      source_assessment_version: 1,
+      original_text: proposal.text,
+      scope: { kind: "default", explicitlyLongTerm: true },
+      scope_quote: "以后所有对话",
+    });
+    proposal = preferenceClaim("这次对话请给完整解释。", "E2");
+    const corrected = await ok(
+      `/api/core/explorations/${id}/correct`,
+      {
+        expected_version: done.version,
+        claim_revision_ids: [first.id],
+        correction: { type: "changed_now", note: proposal.text },
+      },
+      prefApp,
+    );
+    const [next] = await db
+      .select()
+      .from(coreSchema.claimRevisions)
+      .where(eq(coreSchema.claimRevisions.id, corrected.claims[0].claim_revision_id));
+    expect(next.details.interaction_preference).toMatchObject({
+      source_id: corrected.correction_source_id,
+      source_assessment_version: 1,
+      original_text: proposal.text,
+      scope: { kind: "conversation", id },
+    });
+    expect(next.details.interaction_preference).not.toHaveProperty("scope_quote");
+    expect(
+      (
+        await db
+          .select()
+          .from(coreSchema.claimRevisions)
+          .where(eq(coreSchema.claimRevisions.id, first.id))
+      )[0].status,
+    ).toBe("superseded");
+  });
+
+  it("keeps unverified preference scopes local and binds explicit one-turn wording to its source", async () => {
+    const cases: Array<{
+      original: string;
+      scope: NonNullable<ClaimDraft["interaction_preference"]>["scope"];
+      scopeQuote?: string;
+      expected: "conversation" | "turn";
+    }> = [
+      {
+        original: "这次先给简短结论。",
+        scope: { kind: "default", explicitlyLongTerm: true } as const,
+        scopeQuote: "这次",
+        expected: "conversation",
+      },
+      {
+        original: "本轮请先给简短结论。",
+        scope: { kind: "conversation" } as const,
+        expected: "turn",
+      },
+      {
+        original: "讨论旅行时先给简短结论。",
+        scope: { kind: "topic", id: "unverified-topic" } as const,
+        expected: "conversation",
+      },
+    ];
+    for (const item of cases) {
+      const proposal = preferenceClaim(item.original, "E1", item.scope, item.scopeQuote);
+      const prefApp = coreTestApp({
+        db,
+        gateway: gatewayOf(async (input) =>
+          (input.system ?? "").includes("目标不是延长对话")
+            ? baseExtract(input)
+            : { claims: [proposal], gaps: [], next_question: null, prior_updates: [] },
+        ),
+      });
+      const started = await ok("/api/core/explorations", { event: item.original }, prefApp);
+      const done = await ok(
+        `/api/core/explorations/${started.exploration.id}/continue`,
+        { expected_version: started.exploration.version },
+        prefApp,
+      );
+      const [revision] = await db
+        .select()
+        .from(coreSchema.claimRevisions)
+        .where(eq(coreSchema.claimRevisions.id, done.claims[0].claim_revision_id));
+      expect(revision.scope).toBe(
+        item.expected === "turn"
+          ? "仅该条输入对应的这一轮回复"
+          : "限这段对话，具体条件以偏好原文为准",
+      );
+      expect(revision.details.interaction_preference).toMatchObject({
+        original_text: item.original,
+        scope: {
+          kind: item.expected,
+          id: item.expected === "turn" ? started.event_source_id : started.exploration.id,
+        },
+      });
+    }
+  });
+
+  it("does not qualify quoted, indirect or fabricated preference expressions", () => {
+    const row: EvidenceRow = {
+      key: "E1",
+      spanId: "span",
+      sourceItemId: "source",
+      quote: "这次对话请简短。",
+      authorKind: "subject",
+      eligibility: "eligible",
+      assessmentVersion: 1,
+      attributionStatus: "confirmed_subject",
+      contextCompleteness: "sufficient",
+      temporalPrecision: "exact",
+      assessmentRationale: null,
+    };
+    const proposal = preferenceClaim(row.quote);
+    expect(() =>
+      validateClaimEvidence({ claims: [proposal], gaps: [], next_question: null }, [row]),
+    ).not.toThrow();
+    for (const changed of [
+      { ...row, attributionStatus: "quoted_other" },
+      { ...row, authorKind: "assistant" },
+      { ...row, eligibility: "context_only" },
+      { ...row, quote: "没有这句偏好" },
+    ]) {
+      expect(() =>
+        validateClaimEvidence({ claims: [proposal], gaps: [], next_question: null }, [changed]),
+      ).toThrow("invalid_preference_evidence");
+    }
+    expect(() =>
+      validateClaimEvidence(
+        { claims: [{ ...proposal, mode: "interpretation" }], gaps: [], next_question: null },
+        [row],
+      ),
+    ).toThrow("invalid_preference_classification");
+  });
+
+  it("does not revive a withdrawn claim from old evidence and increments its full revision history after new input", async () => {
+    const { id, done } = await understood();
+    const stopped = await ok(
+      `/api/core/claim-revisions/${done.claims[0].claim_revision_id}/withdraw`,
+      {},
+    );
+    const refused = await post(app, `/api/core/explorations/${id}/continue`, {
+      expected_version: stopped.version,
+    });
+    expect(refused.status).toBe(422);
+    expect((await refused.json()).error.code).toBe("REPLY_REJECTED");
+    let revisions = await db
+      .select()
+      .from(coreSchema.claimRevisions)
+      .where(eq(coreSchema.claimRevisions.claimId, done.claims[0].claim_id))
+      .orderBy(coreSchema.claimRevisions.version);
+    expect(revisions.map((item) => [item.version, item.status])).toEqual([
+      [1, "superseded"],
+      [2, "withdrawn"],
+    ]);
+    const saved = await ok(`/api/core/explorations/${id}/messages`, {
+      expected_version: stopped.version,
+      message: "这次我已经拿到完整资料，主动提出了方案。请根据新经历重新更新这条认识。",
+    });
+    const freshApp = coreTestApp({
+      db,
+      gateway: gatewayOf(async (input) => {
+        if ((input.system ?? "").includes("目标不是延长对话")) return baseExtract(input);
+        return {
+          claims: [
+            {
+              ...CLAIM,
+              text: "这次资料完整时，你主动提出了方案。",
+              scope: "仅限本次资料完整的新经历。",
+              evidence: [{ ...CLAIM.evidence[0], evidence_key: "E2" }],
+            },
+          ],
+          gaps: [],
+          next_question: null,
+          prior_updates: [],
+        };
+      }),
+    });
+    const renewed = await ok(
+      `/api/core/explorations/${id}/continue`,
+      { expected_version: saved.version },
+      freshApp,
+    );
+    revisions = await db
+      .select()
+      .from(coreSchema.claimRevisions)
+      .where(eq(coreSchema.claimRevisions.claimId, done.claims[0].claim_id))
+      .orderBy(coreSchema.claimRevisions.version);
+    expect(revisions.map((item) => item.version)).toEqual([1, 2, 3]);
+    expect(revisions[2].status).toBe("current");
+    expect(revisions[2].supersedesRevisionId).toBe(stopped.withdrawn_revision_id);
+    expect(renewed.claims[0].claim_id).toBe(done.claims[0].claim_id);
+  });
 
   it("saves a correction without the model and processes it later", async () => {
     const { id, done } = await understood();

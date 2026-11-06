@@ -47,3 +47,16 @@ it("keeps exact question and option spans, without old interpretation", () => {
   expect(spans.map((s) => s.text).join("\n")).toContain("B. 休息");
   for (const span of spans) expect(text.slice(span.start, span.end)).toBe(span.text);
 });
+
+it("makes the remaining relevant method families available without importing assistant labels", () => {
+  expect(selectReplyMethods("我认同的价值观和每天的选择不一致。")).toContain(
+    "needs-values-and-narrative",
+  );
+  expect(selectReplyMethods("委托出去的任务我还反复检查，不放心。")).toContain(
+    "trust-and-verification",
+  );
+  expect(selectReplyMethods("我想重新看看生活重心。")).toContain("life-structure-synthesis");
+  expect(
+    selectReplyMethods("继续", [{ role: "assistant", content: "你有信任和人生方向问题。" }]),
+  ).toEqual(["experience-and-evidence"]);
+});

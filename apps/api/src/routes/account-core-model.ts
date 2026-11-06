@@ -15,6 +15,7 @@ import type { CoreStore, PersonalContext } from "../core/exploration-types.js";
 import type { CoreGateway } from "../core/llm.js";
 import {
   beginCoreOperation,
+  completeCoreOperation,
   getCoreOperation,
   markCoreOperationFailed,
 } from "../core/operations.js";
@@ -63,6 +64,7 @@ const CorrectBody = z.union([
     correction: CorrectUnderstandingInput.shape.correction,
   }),
 ]);
+const CancelBody = z.object({ execution_id: z.string().uuid() }).strict();
 const ReplyBody = z.object({
   expected_version: z.number().int().positive(),
   message_source_id: z.string().uuid(),
@@ -124,6 +126,22 @@ export function accountCoreModelRoutes(options: AccountCoreModelOptions) {
   const gateway = options.gateway ? singleAttemptGateway(options.gateway) : undefined;
   const dailyOperationLimit = gateway ? Math.max(0, Math.floor(options.dailyOperationLimit)) : 0;
   const r = new Hono();
+  // The durable operation owns publication; this process-local handle only aborts
+  // its current transport. A new retry always gets a different execution token.
+  const activeReplies = new Map<
+    string,
+    { executionId: string; explorationId: string; controller: AbortController }
+  >();
+  const processingBody = (operationId: string) => {
+    const active = activeReplies.get(operationId);
+    return {
+      operation_id: operationId,
+      status: "processing" as const,
+      ...(active && !active.controller.signal.aborted
+        ? { execution_id: active.executionId, can_cancel: true }
+        : { can_cancel: false }),
+    };
+  };
   const requireGateway = () => {
     if (!gateway || dailyOperationLimit <= 0)
       throw new CoreError("LLM_UNAVAILABLE", 503, "自动处理尚未启用");
@@ -157,12 +175,80 @@ export function accountCoreModelRoutes(options: AccountCoreModelOptions) {
       operation.status === "processing" &&
       (!operation.leaseExpiresAt || operation.leaseExpiresAt.getTime() <= Date.now());
     return c.json({
+      stopping: activeReplies.get(id)?.controller.signal.aborted === true,
+      ...(operation.status === "processing" && !expired
+        ? processingBody(id)
+        : { can_cancel: false }),
       status: expired ? "stale" : operation.status,
       ...(operation.status === "completed" ? { response: operation.responseBody } : {}),
       ...(operation.status === "failed" && operation.responseBody?.error
         ? { error: operation.responseBody.error }
         : {}),
     });
+  });
+
+  r.post("/model-operations/:id/cancel", zValidator("json", CancelBody), async (c) => {
+    const ctx = await options.contextFor(c);
+    const id = z.string().uuid().parse(c.req.param("id"));
+    const body = c.req.valid("json");
+    const key = idempotencyKey(c);
+    let abort: AbortController | undefined;
+    const response = await withProfileTransaction(db, ctx, async (tx) => {
+      await lockPiProfileState(tx, ctx);
+      const scoped = tx as unknown as Db;
+      const target = await getCoreOperation(scoped, ctx, id);
+      if (!target || target.operationType !== "exploration_reply" || !options.piReply)
+        throw new CoreError("NOT_FOUND", 404, "可停止的回应不存在");
+      const cancellation = await beginCoreOperation(scoped, ctx, {
+        idempotencyKey: key,
+        operationType: "exploration_reply_cancel",
+        request: { operation_id: id, execution_id: body.execution_id },
+        explorationId: target.explorationId ?? undefined,
+      });
+      if (cancellation.kind === "replay") return cancellation.body;
+      if (cancellation.kind === "processing")
+        throw new CoreError("OPERATION_IN_PROGRESS", 409, "停止请求仍在处理");
+      const [locked] = await scoped
+        .select()
+        .from(coreSchema.coreOperations)
+        .where(
+          and(
+            eq(coreSchema.coreOperations.id, id),
+            eq(coreSchema.coreOperations.subjectId, ctx.subjectId),
+          ),
+        )
+        .for("update");
+      if (!locked) throw new CoreError("NOT_FOUND", 404, "可停止的回应不存在");
+      const active = activeReplies.get(id);
+      if (locked.status === "processing" && active && active.executionId !== body.execution_id)
+        throw new CoreError("STALE_VERSION", 409, "这次生成已变化，请重新读取当前状态");
+      let status = locked.status;
+      if (locked.status === "processing") {
+        await scoped
+          .update(coreSchema.coreOperations)
+          .set({
+            status: "failed",
+            leaseExpiresAt: null,
+            completedAt: new Date(),
+            responseStatus: 409,
+            responseBody: { error: { code: "PI_USER_ABORTED", message: "本轮已停止，输入已保存" } },
+          })
+          .where(eq(coreSchema.coreOperations.id, id));
+        abort = active?.controller;
+        status = "stopped";
+      } else if (
+        (locked.responseBody?.error as { code?: string } | undefined)?.code === "PI_USER_ABORTED"
+      ) {
+        status = "stopped";
+      }
+      const result = { operation_id: id, status };
+      await completeCoreOperation(scoped, cancellation.operationId, 200, result);
+      return result;
+    });
+    // Do not bind cancellation to the browser connection: HTTP 202 work survives
+    // navigation/disconnect. Only this explicit, scoped action aborts transport.
+    abort?.abort();
+    return c.json(response);
   });
 
   async function run(
@@ -173,7 +259,11 @@ export function accountCoreModelRoutes(options: AccountCoreModelOptions) {
       request: Record<string, unknown>;
       explorationId: string;
       basisVersion: number;
-      execute: (store: CoreStore, operationId: string) => Promise<Record<string, unknown>>;
+      execute: (
+        store: CoreStore,
+        operationId: string,
+        signal?: AbortSignal,
+      ) => Promise<Record<string, unknown>>;
     },
   ) {
     const key = idempotencyKey(c);
@@ -196,6 +286,13 @@ export function accountCoreModelRoutes(options: AccountCoreModelOptions) {
           ),
         )
         .limit(1);
+      if (
+        [...activeReplies.values()].some(
+          (active) =>
+            active.explorationId === args.explorationId && active.controller.signal.aborted,
+        )
+      )
+        throw new CoreError("OPERATION_IN_PROGRESS", 409, "上一轮正在停止，请稍后重试");
       const started = await beginCoreOperation(scoped, args.ctx, {
         idempotencyKey: key,
         operationType: args.operationType,
@@ -245,13 +342,21 @@ export function accountCoreModelRoutes(options: AccountCoreModelOptions) {
         status: operation.status,
         headers: { "content-type": "application/json; charset=UTF-8" },
       });
-    if (operation.kind === "processing")
-      return c.json({ operation_id: operation.operationId, status: "processing" }, 202);
+    if (operation.kind === "processing") return c.json(processingBody(operation.operationId), 202);
 
+    const active =
+      options.piReply && args.operationType === "exploration_reply"
+        ? {
+            executionId: crypto.randomUUID(),
+            explorationId: args.explorationId,
+            controller: new AbortController(),
+          }
+        : undefined;
+    if (active) activeReplies.set(operation.operationId, active);
     const store = profileCoreStore(db, args.ctx);
     const execute = async () => {
       try {
-        const result = await args.execute(store, operation.operationId);
+        const result = await args.execute(store, operation.operationId, active?.controller.signal);
         const source = typeof result.source_id === "string" ? result.source_id : undefined;
         if (source)
           await withProfileTransaction(db, args.ctx, (tx) =>
@@ -281,10 +386,14 @@ export function accountCoreModelRoutes(options: AccountCoreModelOptions) {
                 and(
                   eq(coreSchema.coreOperations.id, operation.operationId),
                   eq(coreSchema.coreOperations.status, "failed"),
+                  sql`coalesce(${coreSchema.coreOperations.responseBody}->'error'->>'code','') <> 'PI_USER_ABORTED'`,
                 ),
               );
         }).catch(() => undefined);
         throw error;
+      } finally {
+        if (activeReplies.get(operation.operationId) === active)
+          activeReplies.delete(operation.operationId);
       }
     };
     if (!options.piReply || args.operationType !== "exploration_reply") return execute();
@@ -292,14 +401,16 @@ export function accountCoreModelRoutes(options: AccountCoreModelOptions) {
     // The same durable reservation continues after HTTP 202; polling is read-only.
     // Catch a late rejection because its failed status is already persisted above.
     void task.catch(() => undefined);
+    // App callers opt into immediate acknowledgement so a real execution token
+    // is available for stop; default API callers retain synchronous compatibility.
+    if (c.req.query("async") === "1") return c.json(processingBody(operation.operationId), 202);
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       return await Promise.race([
         task,
         new Promise<Response>((resolve) => {
           timer = setTimeout(
-            () =>
-              resolve(c.json({ operation_id: operation.operationId, status: "processing" }, 202)),
+            () => resolve(c.json(processingBody(operation.operationId), 202)),
             options.piSynchronousWaitMs ?? 8000,
           );
         }),
@@ -355,9 +466,9 @@ export function accountCoreModelRoutes(options: AccountCoreModelOptions) {
       request: input,
       explorationId: input.exploration_id,
       basisVersion: input.expected_version,
-      execute: (store, operationId) =>
+      execute: (store, operationId, signal) =>
         options.piReply
-          ? options.piReply(ctx, input, operationId)
+          ? options.piReply(ctx, input, operationId, signal)
           : replyToMessageWith(store, model, ctx, input, operationId),
     });
   });

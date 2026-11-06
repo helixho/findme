@@ -75,6 +75,25 @@ export const EvidenceUse = z.object({
 });
 export type EvidenceUse = z.infer<typeof EvidenceUse>;
 
+/** Explicit communication preferences proposed only during requested understanding updates. */
+export const InteractionPreferenceDraft = z
+  .object({
+    evidence_key: z.string().min(1).max(120),
+    original_text: z.string().trim().min(1).max(1600),
+    scope: z
+      .discriminatedUnion("kind", [
+        z.object({ kind: z.literal("turn") }).strict(),
+        z.object({ kind: z.literal("conversation") }).strict(),
+        z.object({ kind: z.literal("topic"), id: z.string().min(1).max(160) }).strict(),
+        z.object({ kind: z.literal("task"), id: z.string().min(1).max(160) }).strict(),
+        z.object({ kind: z.literal("default"), explicitlyLongTerm: z.literal(true) }).strict(),
+      ])
+      .default({ kind: "conversation" }),
+    scope_quote: z.string().trim().min(1).max(1600).optional(),
+  })
+  .strict();
+export type InteractionPreferenceDraft = z.infer<typeof InteractionPreferenceDraft>;
+
 export const ClaimDraft = z.object({
   key: z.string().min(1).max(120),
   kind: ClaimKind,
@@ -84,6 +103,7 @@ export const ClaimDraft = z.object({
   confidence_level: ConfidenceLevel,
   confidence_basis: z.string().min(1).max(1200),
   evidence: z.array(EvidenceUse).min(1),
+  interaction_preference: InteractionPreferenceDraft.nullish(),
 });
 export type ClaimDraft = z.infer<typeof ClaimDraft>;
 export const KnowledgeGap = z.object({

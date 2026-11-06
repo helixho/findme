@@ -2,14 +2,27 @@ import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { type Db, coreSchema as c } from "@findme/db";
 import { and, desc, eq, lte, notInArray, sql } from "drizzle-orm";
 import { z } from "zod";
-import { withProfileTransaction } from "../cloud-diagnostic/scope.js";
+import { lockPiProfileState, withProfileTransaction } from "../cloud-diagnostic/scope.js";
 import type { PersonalContext } from "../core/exploration-types.js";
+import { explicitChoiceLabels } from "./choice-context.js";
+import type { ContextTask } from "./context.js";
 import {
   NativeConversationReader,
   questionBackground,
   questionBackgroundSpans,
 } from "./native-conversations.js";
 import { type PiArchiveDependency, capturePiDependencies } from "./pi-archive.js";
+import { UnderstandingReadTools } from "./read-tools.js";
+import type { PiRevisionDependency } from "./revision-dependencies.js";
+
+export type PiReadToolCollector = {
+  tools: ToolDefinition[];
+  dependencies: () => PiArchiveDependency[];
+  revisionDependencies: () => PiRevisionDependency[];
+  initialContext: (
+    task: ContextTask,
+  ) => Promise<Awaited<ReturnType<UnderstandingReadTools["initialContext"]>>>;
+};
 
 /** Reading tools own lineage collection; the model never supplies dependency ids. */
 export function createPiReadTools(
@@ -21,8 +34,17 @@ export function createPiReadTools(
     currentConversationId?: string;
     withheldSourceIds?: string[];
     asOf?: string;
+    revisionDependencies?: readonly PiRevisionDependency[];
   } = {},
-): { tools: ToolDefinition[]; dependencies: () => PiArchiveDependency[] } {
+): PiReadToolCollector {
+  const reader = new UnderstandingReadTools(db, options);
+  const revisionDependencies = new Map(
+    (options.revisionDependencies ?? []).map((dependency) => [
+      dependency.revisionId,
+      dependency.fingerprint,
+    ]),
+  );
+  let currentTask: ContextTask | undefined;
   const asOf = options.asOf
     ? new Date(z.string().datetime({ offset: true }).parse(options.asOf))
     : undefined;
@@ -35,8 +57,36 @@ export function createPiReadTools(
       dependencies.set(item.sourceId, item.fingerprint);
     }
   };
-  const read = async (id: string, includeAnalysis = false) =>
-    withProfileTransaction(db, ctx, async (tx) => {
+  const collectRevisions = (items: readonly PiRevisionDependency[]) => {
+    for (const item of items) {
+      const old = revisionDependencies.get(item.revisionId);
+      if (old && old !== item.fingerprint) throw new Error("PI_REVISION_STALE_DEPENDENCY");
+      revisionDependencies.set(item.revisionId, item.fingerprint);
+    }
+  };
+  const collectDomain = <
+    T extends {
+      dependencies?: readonly PiArchiveDependency[];
+      revision_dependencies?: readonly PiRevisionDependency[];
+      items?: readonly {
+        dependencies?: readonly PiArchiveDependency[];
+        revision_dependencies?: readonly PiRevisionDependency[];
+      }[];
+    },
+  >(
+    result: T,
+  ) => {
+    collect(result.dependencies ?? []);
+    collectRevisions(result.revision_dependencies ?? []);
+    for (const item of result.items ?? []) {
+      collect(item.dependencies ?? []);
+      collectRevisions(item.revision_dependencies ?? []);
+    }
+    return result;
+  };
+  const read = async (id: string, includeAnalysis = false) => {
+    const result = await withProfileTransaction(db, ctx, async (tx) => {
+      await lockPiProfileState(tx, ctx);
       if (options.withheldSourceIds?.includes(id)) throw new Error("SOURCE_NOT_AVAILABLE");
       const deps = await capturePiDependencies(tx, ctx, [id]);
       const [source] = await tx
@@ -143,6 +193,31 @@ export function createPiReadTools(
         sequence: source.sourceMeta?.sequence ?? null,
       };
     });
+    // The source transaction must finish before opening the native reader's
+    // transaction: both acquire the same Profile advisory lock.
+    if (
+      result.author === "subject" &&
+      !result.namespace &&
+      typeof result.content === "string" &&
+      explicitChoiceLabels(result.content) &&
+      typeof result.conversation_id === "string" &&
+      z.string().uuid().safeParse(result.conversation_id).success
+    ) {
+      const context = await new NativeConversationReader(db).choiceBinding(ctx, {
+        conversationId: result.conversation_id,
+        sourceId: id,
+        asOf: options.asOf,
+        beforeSourceId:
+          result.conversation_id === options.currentConversationId
+            ? options.currentMessageId
+            : undefined,
+      });
+      collect(context.dependencies);
+      collectRevisions(context.revision_dependencies);
+      return { ...result, choice_binding: context.binding };
+    }
+    return { ...result, choice_binding: null };
+  };
   const make = (
     name: string,
     description: string,
@@ -166,6 +241,7 @@ export function createPiReadTools(
   });
   const discover = async (query?: string) =>
     withProfileTransaction(db, ctx, async (tx) => {
+      await lockPiProfileState(tx, ctx);
       const terms = query
         ? [...new Set(query.toLocaleLowerCase().split(/\s+/).filter(Boolean))].slice(0, 12)
         : [];
@@ -355,12 +431,138 @@ export function createPiReadTools(
           limit: args.limit,
         });
         collect(result.dependencies);
+        collectRevisions(result.revision_dependencies);
         return declared(result, UseDeclaration.parse(args));
+      },
+    ),
+    make(
+      "browse_understandings",
+      "浏览当前、候选和争议认识的有界索引；可用claim_id限定同一认识的版本。索引不是原始证据。撤回历史仅在include_history明确为true时返回，且不能当作当前前提。",
+      {
+        cursor: { type: "integer", minimum: 0 },
+        limit: { type: "integer", minimum: 1, maximum: 50 },
+        include_history: { type: "boolean" },
+        claim_id: { type: "string" },
+      },
+      [],
+      async (input) => {
+        const args = z
+          .object({
+            cursor: z.number().int().nonnegative().optional(),
+            limit: z.number().int().min(1).max(50).optional(),
+            include_history: z.boolean().optional(),
+            claim_id: z.string().uuid().optional(),
+          })
+          .parse(input);
+        return collectDomain(
+          await reader.listUnderstandings(ctx, {
+            ...args,
+            includeHistory: args.include_history,
+            claimId: args.claim_id,
+          }),
+        );
+      },
+    ),
+    make(
+      "read_revision",
+      "展开确切认识修订、修订原因、前版本编号、分页本人反馈和仍可用证据；反馈不是独立支持；部分依据失效时隐藏认识正文，只返回剩余依据。候选和历史不升级为当前认识。",
+      {
+        id: { type: "string" },
+        include_history: { type: "boolean" },
+        feedback_cursor: { type: "integer", minimum: 0 },
+        feedback_limit: { type: "integer", minimum: 1, maximum: 20 },
+        ...useProperties,
+      },
+      ["id", "intended_use", "relation"],
+      async (input) => {
+        const args = z
+          .object({
+            id: z.string().uuid(),
+            include_history: z.boolean().optional(),
+            feedback_cursor: z.number().int().nonnegative().optional(),
+            feedback_limit: z.number().int().min(1).max(20).optional(),
+          })
+          .merge(UseDeclaration)
+          .parse(input);
+        return declared(
+          collectDomain(
+            await reader.readRevision(ctx, {
+              id: args.id,
+              includeHistory: args.include_history,
+              feedbackCursor: args.feedback_cursor,
+              feedbackLimit: args.feedback_limit,
+            }),
+          ),
+          UseDeclaration.parse(args),
+        );
+      },
+    ),
+    make(
+      "read_imported_conversation",
+      "按导入namespace分页读取原会话；原文只在当前资格与本次时间范围内返回，计数说明排除与遗漏。",
+      {
+        namespace: { type: "string" },
+        include_analysis: { type: "boolean" },
+        cursor: { type: "integer", minimum: 0 },
+        limit: { type: "integer", minimum: 1, maximum: 50 },
+        ...useProperties,
+      },
+      ["namespace", "intended_use", "relation"],
+      async (input) => {
+        const args = z
+          .object({
+            namespace: z.string().min(1).max(160),
+            include_analysis: z.boolean().optional(),
+            cursor: z.number().int().nonnegative().optional(),
+            limit: z.number().int().min(1).max(50).optional(),
+          })
+          .merge(UseDeclaration)
+          .parse(input);
+        return declared(
+          collectDomain(
+            await reader.readConversation(ctx, { ...args, includeAnalysis: args.include_analysis }),
+          ),
+          UseDeclaration.parse(args),
+        );
+      },
+    ),
+    make(
+      "coverage",
+      "查看本资料的来源资格及认识状态数量；这是对象计数，不代表生活领域覆盖或已阅读所有内容。",
+      {},
+      [],
+      async () => reader.coverage(ctx),
+    ),
+    make(
+      "read_applicable_preferences",
+      "分页读取已明确表达、来源有效且适用于当前任务的交互偏好；不从普通文字猜测长期偏好。",
+      {
+        cursor: { type: "integer", minimum: 0 },
+        limit: { type: "integer", minimum: 1, maximum: 50 },
+      },
+      [],
+      async (input) => {
+        if (!currentTask) throw new Error("TASK_CONTEXT_NOT_SET");
+        const page = z
+          .object({
+            cursor: z.number().int().nonnegative().optional(),
+            limit: z.number().int().min(1).max(50).optional(),
+          })
+          .parse(input);
+        const result = await reader.interactionPreferences(ctx, currentTask, page);
+        collectDomain(result);
+        return { ...result, qualification: "scoped_interaction_preferences_not_personality" };
       },
     ),
   ];
   return {
     tools,
+    initialContext: async (task: ContextTask) => {
+      currentTask = structuredClone(task);
+      return collectDomain(await reader.initialContext(ctx, task));
+    },
+    revisionDependencies: () =>
+      [...revisionDependencies].map(([revisionId, fingerprint]) => ({ revisionId, fingerprint })),
     dependencies: () =>
       [...dependencies].map(([sourceId, fingerprint]) => ({ sourceId, fingerprint })),
   };

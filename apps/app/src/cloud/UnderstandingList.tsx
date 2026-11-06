@@ -73,7 +73,7 @@ export function UnderstandingList({ onTalk }: { onTalk: (explorationId: string) 
     <section className="home-section">
       <h2>全部认识</h2>
       <p className="muted">
-        这里是系统现在会使用的全部认识。觉得不对可以直接纠正；不想再被使用的，可以停用。
+        这里保留当前认识和待核对的判断。有异议的内容会标明，核对前不作为无争议前提。觉得不对可以纠正，也可以停用。
       </p>
       {error && (
         <p className="form-error" role="alert">
@@ -92,6 +92,7 @@ export function UnderstandingList({ onTalk }: { onTalk: (explorationId: string) 
           return (
             <li key={claim.claim_revision_id}>
               {claim.text}
+              {claim.pending_feedback && <span className="fm-status">有本人反馈待核对</span>}
               {claim.evidence_status !== "valid" && (
                 <span className="fm-status">依据已变化，待重新确认</span>
               )}

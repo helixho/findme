@@ -287,3 +287,134 @@ it("keeps search misses empty, discovers bounded clues separately, and enforces 
     await Promise.all([db.sql.end(), identity.sql.end()]);
   }
 });
+
+it("registers source and revision dependencies for knowledge tools and initial context", async () => {
+  const cfg = JSON.parse(await readFile(process.env.FINDME_ACCOUNT_VERIFY_CONFIG!, "utf8"));
+  const db = createDb(cfg.runtime_url);
+  const identity = createDb(cfg.identity_url);
+  try {
+    const profiles = new ProfileService(identity.db);
+    const ctx = await profiles.resolve({ provider: "pi-domain-test", principalId: randomUUID() });
+    const other = await profiles.resolve({ provider: "pi-domain-test", principalId: randomUUID() });
+    const data = await withProfileTransaction(db.db, ctx, async (tx) => {
+      const [source] = await tx
+        .insert(c.sourceItems)
+        .values({
+          ...ctx,
+          sourceKind: "event",
+          authorKind: "subject",
+          content: "图书馆值班时我核对归还清单。",
+        })
+        .returning();
+      await tx.insert(c.sourceAssessments).values({
+        sourceItemId: source!.id,
+        version: 1,
+        attributionStatus: "confirmed_subject",
+        contextCompleteness: "complete",
+        temporalPrecision: "unknown",
+        eligibility: "eligible",
+        rationale: "synthetic",
+      });
+      const [span] = await tx
+        .insert(c.evidenceSpans)
+        .values({
+          sourceItemId: source!.id,
+          quote: source!.content,
+          locator: { start: 0, end: source!.content.length },
+          authorKind: "subject",
+          aboutSubject: true,
+        })
+        .returning();
+      const [claim] = await tx
+        .insert(c.claims)
+        .values({ ...ctx, claimKey: `knowledge:${randomUUID()}`, claimKind: "behavior" })
+        .returning();
+      const [revision] = await tx
+        .insert(c.claimRevisions)
+        .values({
+          claimId: claim!.id,
+          version: 1,
+          mode: "observation",
+          text: "图书馆值班会核对归还清单",
+          scope: "该次图书馆值班",
+          status: "current",
+          evidenceStatus: "valid",
+          confidenceLevel: "low",
+          confidenceBasis: "synthetic",
+        })
+        .returning();
+      await tx.insert(c.claimEvidence).values({
+        claimRevisionId: revision!.id,
+        evidenceSpanId: span!.id,
+        relation: "supports",
+        directness: "direct",
+        contribution: "medium",
+        independenceGroup: source!.id,
+        scopeMatch: "exact",
+        rationale: "synthetic",
+      });
+      return { source: source!, revision: revision! };
+    });
+    const collector = createPiReadTools(db.db, ctx);
+    const call = async (
+      set: ReturnType<typeof createPiReadTools>,
+      name: string,
+      input: unknown,
+    ) => {
+      const tool = set.tools.find((t) => t.name === name);
+      if (!tool) throw Error("tool missing");
+      const out = await (
+        tool.execute as unknown as (
+          id: string,
+          input: unknown,
+        ) => Promise<{ content: Array<{ text: string }> }>
+      )("domain", input);
+      return JSON.parse(out.content[0]!.text);
+    };
+    const declaration = { intended_use: "inspection", relation: "先核对这条认识的来源和适用范围" };
+    const viewed = await call(collector, "read_revision", { id: data.revision.id, ...declaration });
+    expect(viewed.qualified).toBe(true);
+    expect(viewed.text).toContain("归还清单");
+    expect(viewed.use_declaration.status).toBe("candidate_not_adopted");
+    expect(collector.dependencies().map((d) => d.sourceId)).toContain(data.source.id);
+    expect(collector.revisionDependencies().map((d) => d.revisionId)).toEqual([data.revision.id]);
+    const context = await collector.initialContext({
+      id: randomUUID(),
+      conversationId: randomUUID(),
+      taskType: "conversation",
+      intent: "conversation",
+      input: "图书馆清单",
+      writesUnderstanding: false,
+    });
+    expect(context.understandingIndex.map((i) => i.id)).toContain(data.revision.id);
+    await expect(
+      call(createPiReadTools(db.db, other), "read_revision", {
+        id: data.revision.id,
+        ...declaration,
+      }),
+    ).rejects.toThrow("REVISION_NOT_AVAILABLE");
+    await withProfileTransaction(db.db, ctx, async (tx) => {
+      await tx
+        .update(c.claimRevisions)
+        .set({ status: "withdrawn" })
+        .where(eq(c.claimRevisions.id, data.revision.id));
+    });
+    const { assertPiRevisionsCurrent } = await import(
+      "../src/personal-understanding/revision-dependencies.js"
+    );
+    await expect(
+      withProfileTransaction(db.db, ctx, (tx) =>
+        assertPiRevisionsCurrent(tx, ctx, collector.revisionDependencies()),
+      ),
+    ).rejects.toThrow("PI_REVISION_STALE_DEPENDENCY");
+    const history = await call(createPiReadTools(db.db, ctx), "read_revision", {
+      id: data.revision.id,
+      include_history: true,
+      ...declaration,
+    });
+    expect(history.qualified).toBe(false);
+    expect(history.qualification).toBe("historical_not_current_premise");
+  } finally {
+    await Promise.all([db.sql.end(), identity.sql.end()]);
+  }
+});

@@ -10,6 +10,7 @@ import {
   questionBackground,
   questionBackgroundSpans,
 } from "../src/personal-understanding/native-conversations.js";
+import { createPiReadTools } from "../src/personal-understanding/pi-read-tools.js";
 
 it("reads complete native messages, preserves short-answer context and withholds excluded history", async () => {
   const config = JSON.parse(await readFile(process.env.FINDME_ACCOUNT_VERIFY_CONFIG!, "utf8"));
@@ -39,7 +40,13 @@ it("reads complete native messages, preserves short-answer context and withholds
           .returning();
         const [source] = await tx
           .insert(c.sourceItems)
-          .values({ ...ctx, sourceKind: "native_event", authorKind: "subject", content: "B" })
+          .values({
+            ...ctx,
+            sourceKind: "native_event",
+            authorKind: "subject",
+            content: "B",
+            sourceMeta: { exploration_id: conversation!.id },
+          })
           .returning();
         await tx.insert(c.sourceAssessments).values({
           sourceItemId: source!.id,
@@ -81,6 +88,35 @@ it("reads complete native messages, preserves short-answer context and withholds
     expect(JSON.stringify(filtered)).not.toContain("具体背景");
     const answerPage = await reader.read(ctx, { conversationId, cursor: 1, limit: 1 });
     expect(answerPage.preceding_question_background).toContain("B. 休息");
+    expect(answerPage.turns[0]?.choice_binding).toMatchObject({
+      kind: "derived_selection",
+      answer_source_id: sourceId,
+      selected_labels: ["B"],
+      not_spontaneous_quote: true,
+      scope: "question_conditions_only",
+    });
+    expect(answerPage.turns[0]?.choice_binding?.options.map((option) => option.text)).toEqual([
+      "A. 参加",
+      "B. 休息",
+    ]);
+    expect(JSON.stringify(answerPage.turns[0]?.choice_binding)).not.toContain("OLD_ANALYSIS");
+    const nativeChoice = await reader.choiceBinding(ctx, { conversationId, sourceId });
+    expect(nativeChoice.binding).toEqual(answerPage.turns[0]?.choice_binding);
+    const sourceTool = createPiReadTools(runtime.db, ctx).tools.find(
+      (tool) => tool.name === "read_source",
+    );
+    if (!sourceTool) throw new Error("source tool absent");
+    const sourceResult = await (
+      sourceTool.execute as unknown as (
+        id: string,
+        args: unknown,
+      ) => Promise<{ content: Array<{ text: string }> }>
+    )("native-choice-source", {
+      id: sourceId,
+      intended_use: "inspection",
+      relation: "核对这个简短答复对应的问题",
+    });
+    expect(JSON.parse(sourceResult.content[0]!.text).choice_binding).toEqual(nativeChoice.binding);
     expect(full.turns[0]!.qualification).toBe("assistant_context_not_evidence");
     const first = await reader.read(ctx, { conversationId, limit: 1 });
     expect(first.next_cursor).toBe(1);
@@ -329,4 +365,145 @@ it("preserves Markdown option labels and their bounded colon-ended question para
   const multiline =
     "上一个判断。\n\n请根据现在的安排\n选一个最合适的：\n- **A：** 先留空\n- **B**：约下周";
   expect(questionBackground(multiline)).toContain("请根据现在的安排\n选一个最合适的：");
+});
+
+it("does not bind a short answer across a time-filtered or unavailable intervening question", async () => {
+  const cfg = JSON.parse(await readFile(process.env.FINDME_ACCOUNT_VERIFY_CONFIG!, "utf8"));
+  const runtime = createDb(cfg.runtime_url);
+  const identity = createDb(cfg.identity_url);
+  try {
+    const ctx = await new ProfileService(identity.db).resolve({
+      provider: "choice-adjacency",
+      principalId: randomUUID(),
+    });
+    const base = 1700000000000;
+    const f = await withProfileTransaction(runtime.db, ctx, async (tx) => {
+      const [experience] = await tx
+        .insert(c.experiences)
+        .values({ ...ctx, summary: "合成预约答复" })
+        .returning();
+      if (!experience) throw new Error("fixture");
+      const [conversation] = await tx
+        .insert(c.explorations)
+        .values({ ...ctx, experienceId: experience.id })
+        .returning();
+      if (!conversation) throw new Error("fixture");
+      const addSource = async (
+        content: string,
+        captured: number,
+        authorKind = "subject",
+        eligibility = "eligible",
+      ) => {
+        const [source] = await tx
+          .insert(c.sourceItems)
+          .values({
+            ...ctx,
+            content,
+            authorKind,
+            sourceKind: "native_event",
+            capturedAt: new Date(base + captured),
+            sourceMeta: { exploration_id: conversation.id },
+          })
+          .returning();
+        if (!source) throw new Error("fixture");
+        await tx.insert(c.sourceAssessments).values({
+          sourceItemId: source.id,
+          version: 1,
+          attributionStatus: authorKind === "subject" ? "confirmed_subject" : "not_subject",
+          contextCompleteness: "sufficient",
+          temporalPrecision: "unknown",
+          eligibility,
+          rationale: "synthetic",
+        });
+        return source;
+      };
+      const old = await addSource("先讨论预约安排", 500);
+      const hidden = await addSource("PRIVATE_LATE_QUESTION", 4000, "assistant", "context_only");
+      const answer = await addSource("B", 3000);
+      await tx.insert(c.explorationTurns).values({
+        explorationId: conversation.id,
+        role: "user",
+        turnKind: "event",
+        content: old.content,
+        sourceItemId: old.id,
+        createdAt: new Date(base + 500),
+      });
+      const [oldQuestion] = await tx
+        .insert(c.explorationTurns)
+        .values({
+          explorationId: conversation.id,
+          role: "assistant",
+          turnKind: "pi_reply",
+          content: "旧问题：\nA. OLD_CHOICE_A\nB. OLD_CHOICE_B",
+          createdAt: new Date(base + 1000),
+        })
+        .returning();
+      if (!oldQuestion) throw new Error("fixture");
+      await tx
+        .update(c.sourceItems)
+        .set({
+          sourceMeta: {
+            exploration_id: conversation.id,
+            reply: { engine: "pi", turn_id: oldQuestion.id, source_ids: [old.id] },
+          },
+        })
+        .where(eq(c.sourceItems.id, old.id));
+      await tx.insert(c.explorationTurns).values([
+        {
+          explorationId: conversation.id,
+          role: "assistant",
+          turnKind: "reply",
+          sourceItemId: hidden.id,
+          content: "PRIVATE_LATE_QUESTION：\n- **A**：NEW_CHOICE_A\n- **B**：NEW_CHOICE_B",
+          createdAt: new Date(base + 2000),
+        },
+        {
+          explorationId: conversation.id,
+          role: "user",
+          turnKind: "message",
+          sourceItemId: answer.id,
+          content: answer.content,
+          createdAt: new Date(base + 3000),
+        },
+      ]);
+      return { conversationId: conversation.id, hiddenId: hidden.id, answerId: answer.id };
+    });
+    const reader = new NativeConversationReader(runtime.db);
+    const current = await reader.choiceBinding(ctx, {
+      conversationId: f.conversationId,
+      sourceId: f.answerId,
+    });
+    expect(current.binding?.selected_options[0]?.text).toContain("NEW_CHOICE_B");
+    const asOf = new Date(base + 3000).toISOString();
+    const historical = await reader.read(ctx, { conversationId: f.conversationId, asOf });
+    expect(
+      historical.turns.find((turn) => turn.source_id === f.answerId)?.choice_binding,
+    ).toBeNull();
+    expect(historical.turns.find((turn) => turn.kind === "pi_reply")?.content).toContain(
+      "OLD_CHOICE_B",
+    );
+    expect(JSON.stringify(historical)).not.toContain("PRIVATE_LATE_QUESTION");
+    const focused = await reader.choiceBinding(ctx, {
+      conversationId: f.conversationId,
+      sourceId: f.answerId,
+      asOf,
+    });
+    expect(focused.binding).toBeNull();
+    expect(focused.dependencies.map((dependency) => dependency.sourceId)).not.toContain(f.hiddenId);
+    await withProfileTransaction(runtime.db, ctx, (tx) =>
+      tx
+        .update(c.sourceItems)
+        .set({ usageStatus: "excluded" })
+        .where(eq(c.sourceItems.id, f.hiddenId)),
+    );
+    const excluded = await reader.read(ctx, { conversationId: f.conversationId });
+    expect(excluded.turns.find((turn) => turn.source_id === f.answerId)?.content).toBe("B");
+    expect(excluded.turns.find((turn) => turn.source_id === f.answerId)?.choice_binding).toBeNull();
+    expect(excluded.turns.find((turn) => turn.kind === "pi_reply")?.content).toContain(
+      "OLD_CHOICE_B",
+    );
+    expect(JSON.stringify(excluded)).not.toContain("PRIVATE_LATE_QUESTION");
+  } finally {
+    await Promise.all([runtime.sql.end(), identity.sql.end()]);
+  }
 });

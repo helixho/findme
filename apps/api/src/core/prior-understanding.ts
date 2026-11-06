@@ -5,6 +5,7 @@ import { lexicalScores } from "../diagnostic-reasoning/ranking.js";
 import { hasUnsafeUnderstandingText } from "./epistemic-policy.js";
 import { CoreError } from "./errors.js";
 import type { EvidenceRow, PersonalContext } from "./exploration-types.js";
+import { pendingFeedbackRevisionIds } from "./pending-feedback.js";
 
 /**
  * Bounded, versioned selection of the subject's current understanding formed in
@@ -41,7 +42,7 @@ export type PriorExcluded = {
   revisionId: string;
   text: string;
   scope: string;
-  reason: "withdrawn" | "evidence_invalid" | "evidence_stale";
+  reason: "withdrawn" | "evidence_invalid" | "evidence_stale" | "pending_feedback";
   note: string | null;
 };
 
@@ -156,19 +157,32 @@ export async function loadPriorUnderstanding(
   );
   const current = others.filter((row) => row.status === "current");
   const currentClaimIds = new Set(current.map((row) => row.claimId));
-  const usable = current.filter((row) => row.evidenceStatus === "valid");
+  const pendingFeedback = await pendingFeedbackRevisionIds(
+    db,
+    ctx,
+    current.map((row) => row.revisionId),
+  );
+  const usable = current.filter(
+    (row) => row.evidenceStatus === "valid" && !pendingFeedback.has(row.revisionId),
+  );
   const ranked = rankPriorCandidates(args.queryText, usable);
 
   const excluded: PriorExcluded[] = [];
   for (const row of current) {
-    if (row.evidenceStatus === "valid") continue;
+    if (row.evidenceStatus === "valid" && !pendingFeedback.has(row.revisionId)) continue;
     excluded.push({
       claimId: row.claimId,
       revisionId: row.revisionId,
       text: row.text,
       scope: row.scope,
-      reason: row.evidenceStatus === "invalid" ? "evidence_invalid" : "evidence_stale",
-      note: row.invalidationReason,
+      reason: pendingFeedback.has(row.revisionId)
+        ? "pending_feedback"
+        : row.evidenceStatus === "invalid"
+          ? "evidence_invalid"
+          : "evidence_stale",
+      note: pendingFeedback.has(row.revisionId)
+        ? "有本人反馈待核对；不表示旧结论已判错。"
+        : row.invalidationReason,
     });
   }
   // Only the latest withdrawn revision of a claim with no current revision.
@@ -238,7 +252,7 @@ export function priorContextText(prior: PriorUnderstanding) {
       })),
     ),
     "",
-    "DO_NOT_USE_AS_PREMISE (withdrawn by the user or no longer supported; do not restate or rely on these):",
+    "DO_NOT_USE_AS_PREMISE (withdrawn, no longer supported, or pending user reassessment; do not adopt these as accepted premises):",
     JSON.stringify(
       prior.excluded.map((item) => ({
         text: item.text,
@@ -418,6 +432,15 @@ export async function applyPriorUpdates(
       update.effect === "challenges"
         ? (LOWER[locked.confidenceLevel] ?? "low")
         : locked.confidenceLevel;
+    // A pure support update preserves the explicit preference's original scope.
+    // Narrowing/challenging the claim needs a fresh typed scope declaration;
+    // retain other domain details without silently carrying that old instruction.
+    const details =
+      update.effect === "supports" && text === locked.text && scope === locked.scope
+        ? { ...locked.details }
+        : Object.fromEntries(
+            Object.entries(locked.details).filter(([key]) => key !== "interaction_preference"),
+          );
     const reason = `${EFFECT_LABEL[update.effect]}：${update.rationale}`.slice(0, 1600);
     const [revision] = await tx
       .insert(coreSchema.claimRevisions)
@@ -425,6 +448,7 @@ export async function applyPriorUpdates(
         claimId: locked.claimId,
         version: locked.version + 1,
         mode: locked.mode,
+        details,
         text,
         scope,
         status: "current",
@@ -510,8 +534,11 @@ export async function assertPriorContextIntact(
       status: coreSchema.claimRevisions.status,
       evidenceStatus: coreSchema.claimRevisions.evidenceStatus,
       invalidationReason: coreSchema.claimRevisions.invalidationReason,
+      tenantId: coreSchema.claims.tenantId,
+      subjectId: coreSchema.claims.subjectId,
     })
     .from(coreSchema.claimRevisions)
+    .innerJoin(coreSchema.claims, eq(coreSchema.claims.id, coreSchema.claimRevisions.claimId))
     .where(inArray(coreSchema.claimRevisions.claimId, claimIds))
     // One statement in id order for prior and local rows; taking the exclusive
     // lock up front avoids upgrade and cross-order deadlocks between commits.
@@ -519,6 +546,20 @@ export async function assertPriorContextIntact(
     .for(mode);
   if (rows.some((row) => priorIds.has(row.claimId) && row.invalidationReason === "source_deleted"))
     throw new CoreError("STALE_EXPLORATION_CONTEXT", 409, "参考的已有认识已被删除，请重新处理");
+  const offered = prior.claims.map((claim) => claim.revisionId);
+  const owner = rows[0];
+  if (
+    owner &&
+    offered.length &&
+    (
+      await pendingFeedbackRevisionIds(
+        tx,
+        { tenantId: owner.tenantId, subjectId: owner.subjectId },
+        offered,
+      )
+    ).size
+  )
+    throw new CoreError("STALE_EXPLORATION_CONTEXT", 409, "参考认识出现新的本人反馈，请重新处理");
   const current = new Map(
     rows.filter((row) => row.status === "current").map((row) => [row.claimId, row.id]),
   );

@@ -86,6 +86,7 @@ async function readCorrectionBasis(
       text: revision?.text,
       scope: revision?.scope,
       confidence_level: revision?.confidenceLevel,
+      interaction_preference: revision?.details?.interaction_preference,
     };
   });
 

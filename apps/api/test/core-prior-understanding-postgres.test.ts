@@ -192,6 +192,24 @@ function scenarioGateway(calls: Call[], hooks: { onExtract?: () => Promise<void>
               ]
             : [],
         };
+      if (text.includes("SCENE_CHALLENGE"))
+        return {
+          claims: [],
+          gaps: [gap],
+          next_question: null,
+          prior_updates: meeting
+            ? [
+                {
+                  prior_key: meeting.key,
+                  effect: "challenges",
+                  revised_text: null,
+                  revised_scope: null,
+                  rationale: "新经历与原解释存在尚未解决的反例。",
+                  evidence: [evidence("E1", "challenges")],
+                },
+              ]
+            : [],
+        };
       if (text.includes("SCENE_SUPPORT"))
         return {
           claims: [],
@@ -285,6 +303,70 @@ dbDescribe("P1 main chain: prior understanding in the next exploration", () => {
       .where(eq(coreSchema.claimRevisions.claimId, claimId))
       .orderBy(coreSchema.claimRevisions.version);
   }
+
+  it("preserves all revision details when new evidence only supports the same text and scope", async () => {
+    const first = await explore("metadata-a", "SCENE_A 评审会上我等别人说完才发言。");
+    const claim = first.done.claims[0];
+    const details = {
+      interaction_preference: {
+        explicit: true,
+        source_id: first.started.event_source_id,
+        original_text: "合成偏好元数据",
+        scope: { kind: "conversation", id: first.started.exploration.id },
+      },
+      custom: { retained: true },
+      labels: ["synthetic"],
+    };
+    await db
+      .update(coreSchema.claimRevisions)
+      .set({ details })
+      .where(eq(coreSchema.claimRevisions.id, claim.claim_revision_id));
+    const second = await explore("metadata-support", "SCENE_SUPPORT 另一场评审中我也先听完了。");
+    const effect = second.done.processing.prior_effects.find(
+      (item: { claim_id: string }) => item.claim_id === claim.claim_id,
+    );
+    expect(effect.effect).toBe("supports");
+    const revisions = await revisionsOf(claim.claim_id);
+    expect(revisions[1].text).toBe(revisions[0].text);
+    expect(revisions[1].scope).toBe(revisions[0].scope);
+    expect(revisions[1].details).toEqual(details);
+    expect(revisions[0].details).toEqual(details);
+  });
+
+  it.each(["narrows", "challenges"] as const)(
+    "removes only the unverified interaction scope when a prior claim %s",
+    async (effect) => {
+      const first = await explore("metadata-a", "SCENE_A 评审会上我等别人说完才发言。");
+      const claim = first.done.claims[0];
+      const details = {
+        interaction_preference: {
+          explicit: true,
+          source_id: first.started.event_source_id,
+          original_text: "合成偏好元数据",
+          scope: { kind: "conversation", id: first.started.exploration.id },
+        },
+        custom: { retained: true },
+        labels: ["synthetic"],
+      };
+      await db
+        .update(coreSchema.claimRevisions)
+        .set({ details })
+        .where(eq(coreSchema.claimRevisions.id, claim.claim_revision_id));
+      const second = await explore(
+        "metadata-change",
+        effect === "narrows"
+          ? "SCENE_NARROW 熟人讨论我会直接先表达，上级在场才先听完。"
+          : "SCENE_CHALLENGE 同样条件下，这次我没有先听完就发言。",
+      );
+      const change = second.done.processing.prior_effects.find(
+        (item: { claim_id: string }) => item.claim_id === claim.claim_id,
+      );
+      expect(change.effect).toBe(effect);
+      const revisions = await revisionsOf(claim.claim_id);
+      expect(revisions[1].details).toEqual({ custom: { retained: true }, labels: ["synthetic"] });
+      expect(revisions[0].details).toEqual(details);
+    },
+  );
 
   it("zero history keeps the original synthesis contract and records an empty selection", async () => {
     const { done } = await explore("zero", "SCENE_A 评审会上我等别人说完才发言。");

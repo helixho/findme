@@ -30,6 +30,25 @@ export function validateClaimEvidence(draft: UnderstandingDraft, rows: EvidenceR
         throw new Error(`invalid_evidence_key:${evidence.evidence_key}`);
       }
     }
+    const preference = claim.interaction_preference;
+    if (preference) {
+      const use = claim.evidence.find((item) => item.evidence_key === preference.evidence_key);
+      const row = rows.find((item) => item.key === preference.evidence_key);
+      if (claim.kind !== "value" || claim.mode !== "self_report")
+        throw new Error(`invalid_preference_classification:${claim.key}`);
+      if (
+        !use ||
+        use.relation !== "supports" ||
+        use.directness !== "direct" ||
+        !row ||
+        row.authorKind !== "subject" ||
+        row.attributionStatus !== "confirmed_subject" ||
+        row.eligibility !== "eligible" ||
+        row.assessmentVersion === null ||
+        !row.quote.includes(preference.original_text)
+      )
+        throw new Error(`invalid_preference_evidence:${claim.key}`);
+    }
   }
 }
 

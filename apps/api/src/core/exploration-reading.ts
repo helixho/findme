@@ -3,6 +3,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { CoreError } from "./errors.js";
 import { modelClaimKey } from "./exploration-context.js";
 import type { EvidenceRow, PersonalContext } from "./exploration-types.js";
+import { pendingFeedbackRevisionIds } from "./pending-feedback.js";
 
 export async function loadExploration(
   db: Pick<Db, "select">,
@@ -60,11 +61,17 @@ export async function loadCurrentClaimRows(
     )
     .orderBy(desc(coreSchema.claimRevisions.createdAt));
 
+  const pendingFeedback = await pendingFeedbackRevisionIds(
+    db,
+    ctx,
+    rows.map((row) => row.revisionId),
+  );
   return rows
     .filter((row) => row.claimKey.startsWith(`${explorationId}/`))
     .map((row) => ({
       ...row,
       key: modelClaimKey(explorationId, row.claimKey),
+      pendingFeedback: pendingFeedback.has(row.revisionId),
     }));
 }
 

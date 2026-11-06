@@ -42,6 +42,15 @@ export function selectReplyMethods(
   ) {
     names.add("understanding-revision");
   }
+  if (/价值观|人生意义|认同什么|向往|自我叙事|values|meaning/i.test(topic)) {
+    names.add("needs-values-and-narrative");
+  }
+  if (/信任|不放心|托付|反复检查|反复确认|委托|trust|delegat/i.test(topic)) {
+    names.add("trust-and-verification");
+  }
+  if (/生活结构|生活重心|人生方向|跨领域|life structure/i.test(topic)) {
+    names.add("life-structure-synthesis");
+  }
   if (/聊聊|讨论|迷茫|说不清|想不清|帮我想|问我|选项|探索|talk|explor/i.test(input)) {
     names.add("discriminating-exploration");
   }

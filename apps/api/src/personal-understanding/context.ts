@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { ChoiceBinding } from "./choice-context.js";
 import { type MethodName, type UnderstandingMethods, requiredMethods } from "./methods.js";
 
 export type InteractionPreference = {
@@ -10,6 +11,7 @@ export type InteractionPreference = {
   status: "current" | "candidate" | "withdrawn" | "superseded";
   sourceValid: boolean;
   scope:
+    | { kind: "turn"; id: string }
     | { kind: "conversation"; id: string }
     | { kind: "topic"; id: string }
     | { kind: "task"; id: string }
@@ -18,6 +20,7 @@ export type InteractionPreference = {
 export type ContextTask = {
   id: string;
   conversationId: string;
+  inputSourceId?: string;
   topicId?: string;
   taskType: string;
   intent: "conversation" | "correction" | "synthesis";
@@ -33,6 +36,8 @@ export function applicablePreferences(
   return preferences.filter((p) => {
     if (!p.explicit || !p.sourceId || p.status !== "current" || !p.sourceValid) return false;
     switch (p.scope.kind) {
+      case "turn":
+        return p.scope.id === task.inputSourceId;
       case "conversation":
         return p.scope.id === task.conversationId;
       case "topic":
@@ -59,6 +64,7 @@ export async function prepareUnderstandingContext(
     }[];
     understandingIndex: readonly { id: string; version: number; title: string; status: string }[];
     selectedMethods: readonly MethodName[];
+    choiceBindings?: readonly ChoiceBinding[];
   },
 ) {
   // Capture before the first await so concurrent input changes cannot enter this task.
@@ -79,6 +85,7 @@ export async function prepareUnderstandingContext(
       },
     },
     { kind: "understanding_index", value: input.understandingIndex },
+    { kind: "choice_bindings", value: input.choiceBindings ?? [] },
     {
       kind: "current_input",
       value: {

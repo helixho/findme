@@ -7,6 +7,7 @@ import {
 } from "@earendil-works/pi-ai";
 import { ModelRuntime, SessionManager, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
+import { createConversationHistoryArchive } from "../src/personal-understanding/long-session.js";
 import {
   type PiRequestRecord,
   createFindMePiSession,
@@ -433,4 +434,217 @@ it("unwraps pi replies inside a generated legacy history entry without touching 
   expect(history[1].content).toBe("LEGACY_NESTED_ANSWER");
   expect(JSON.stringify(archive.entries)).toContain("used_claim_keys");
   session.dispose();
+});
+
+function longHistory() {
+  return Array.from({ length: 6 }, (_, i) => [
+    {
+      role: "user",
+      kind: "message",
+      source_id: `source-${i + 1}`,
+      turn_id: `u-${i + 1}`,
+      recorded_at: "2026-11-07T01:00:00.000Z",
+      content: `RAW_USER_${i + 1}：${"原话".repeat(400)}`,
+    },
+    {
+      role: "assistant",
+      kind: "pi_reply",
+      source_id: null,
+      turn_id: `a-${i + 1}`,
+      recorded_at: "2026-11-07T01:00:01.000Z",
+      content: `RAW_ASSISTANT_${i + 1}：${"答复".repeat(400)}`,
+    },
+  ]).flat();
+}
+const compactionPolicy = {
+  maxInputBytes: 48000,
+  reserveBytes: 6000,
+  triggerBytes: 24000,
+  targetBytes: 22000,
+  keepRecentTurns: 2,
+  reserveRequests: 2,
+  sourceIds: ["source-1", "source-2", "source-3", "source-4", "source-5", "source-6"],
+  asOf: "2026-11-07T02:00:00.000Z",
+};
+
+describe("host-controlled long-session compaction", () => {
+  it("summarizes once through the same recorded runtime, keeps recent raw turns and restores the derived checkpoint", async () => {
+    const f = await fixture("compact-conversation");
+    f.provider.setResponses([
+      fauxAssistantMessage("早期对话讨论过职责边界，具体原话可按来源回查。"),
+      fauxAssistantMessage("继续当前讨论。"),
+      fauxAssistantMessage("恢复后继续。"),
+    ]);
+    const archive = createConversationHistoryArchive(
+      f.options.sessionId,
+      longHistory(),
+      f.options.cwd,
+    );
+    const session = await createFindMePiSession({ ...f.options, archive });
+    const prepared = await session.preparePrompt("现在接着聊", compactionPolicy);
+    expect(prepared.compacted).toBe(true);
+    expect(prepared.bytesAfter).toBeLessThanOrEqual(compactionPolicy.targetBytes);
+    expect(session.requestCount()).toBe(1);
+    expect(f.provider.state.callCount).toBe(1);
+    const checkpoint = session.snapshot();
+    const summary = checkpoint.entries.find((entry) => entry.type === "compaction");
+    expect(summary?.type === "compaction" ? summary.details : null).toMatchObject({
+      kind: "derived_conversation_summary",
+      qualification: "context_only",
+      independentEvidence: false,
+      sourceIds: compactionPolicy.sourceIds,
+      contentAsOf: compactionPolicy.asOf,
+    });
+    // Raw source entries remain in the archive; only the model projection shrinks.
+    expect(JSON.stringify(checkpoint.entries)).toContain("RAW_USER_1");
+    expect(await session.prompt("现在接着聊")).toBe("继续当前讨论。");
+    const input = JSON.stringify(
+      f.records.filter((record) => record.output === undefined).at(-1)?.input,
+    );
+    expect(input).not.toContain("RAW_USER_1");
+    expect(input).not.toContain("RAW_ASSISTANT_4");
+    expect(input).toContain("RAW_USER_5");
+    expect(input).toContain("RAW_ASSISTANT_6");
+    expect(input).toContain("派生会话摘要");
+    expect(f.records.filter((record) => record.output !== undefined)).toHaveLength(2);
+    const saved = session.snapshot();
+    session.dispose();
+    const restored = await createFindMePiSession({ ...f.options, archive: saved });
+    expect(await restored.prompt("恢复继续")).toBe("恢复后继续。");
+    const resumed = JSON.stringify(
+      f.records.filter((record) => record.output === undefined).at(-1)?.input,
+    );
+    expect(resumed).toContain("派生会话摘要");
+    expect(resumed).not.toContain("RAW_USER_1");
+    restored.dispose();
+  });
+
+  it("adapts the target to a large current prefix while preserving both recent turns", async () => {
+    const f = await fixture("compact-high-prefix");
+    f.provider.setResponses([fauxAssistantMessage("早期原话保持职责范围，细节可回查。")]);
+    const session = await createFindMePiSession({
+      ...f.options,
+      system: "固定".repeat(3500),
+      archive: createConversationHistoryArchive(f.options.sessionId, longHistory()),
+    });
+    const prepared = await session.preparePrompt("继续", compactionPolicy);
+    expect(prepared.compacted).toBe(true);
+    expect(prepared.bytesBefore).toBeGreaterThan(compactionPolicy.maxInputBytes);
+    expect(prepared.bytesAfter).toBeGreaterThan(compactionPolicy.targetBytes);
+    expect(prepared.bytesAfter).toBeLessThanOrEqual(
+      compactionPolicy.maxInputBytes - compactionPolicy.reserveBytes,
+    );
+    const request = f.records.find((record) => record.output === undefined)?.input as {
+      context: { messages: Array<{ content: string }> };
+    };
+    const material = JSON.parse(request.context.messages[0]!.content);
+    expect(material.summary_budget.max_utf8_bytes).toBeGreaterThanOrEqual(512);
+    expect(material.summary_budget.max_utf8_bytes).toBeLessThanOrEqual(8000);
+    expect(JSON.stringify(session.snapshot())).toContain("RAW_USER_1");
+    session.dispose();
+  });
+
+  it("does not request a summary when the preserved prefix and recent turns leave no summary space", async () => {
+    const f = await fixture("compact-no-space");
+    f.provider.setResponses([fauxAssistantMessage("must not run")]);
+    const session = await createFindMePiSession({
+      ...f.options,
+      system: "固定".repeat(6500),
+      archive: createConversationHistoryArchive(f.options.sessionId, longHistory()),
+    });
+    const before = session.snapshot();
+    await expect(session.preparePrompt("继续", compactionPolicy)).rejects.toThrow(
+      "PI_INPUT_LIMIT_REACHED",
+    );
+    expect(f.provider.state.callCount).toBe(0);
+    expect(session.snapshot()).toEqual(before);
+    session.dispose();
+  });
+
+  it("rejects a budget-compliant summary that enlarges context without publishing the checkpoint", async () => {
+    const f = await fixture("compact-no-shrink");
+    f.provider.setResponses([fauxAssistantMessage("X".repeat(7000))]);
+    const history = longHistory().map((turn, i) => ({
+      ...turn,
+      content: `item-${i}-${"material".repeat(25)}`,
+    }));
+    const session = await createFindMePiSession({
+      ...f.options,
+      system: "S".repeat(18000),
+      archive: createConversationHistoryArchive(f.options.sessionId, history),
+    });
+    const before = session.snapshot();
+    await expect(session.preparePrompt("继续", compactionPolicy)).rejects.toThrow(
+      "PI_INPUT_LIMIT_REACHED",
+    );
+    expect(f.provider.state.callCount).toBe(1);
+    const request = f.records.find((record) => record.output === undefined)?.input as {
+      context: { messages: Array<{ content: string }> };
+    };
+    expect(
+      JSON.parse(request.context.messages[0]!.content).summary_budget.max_utf8_bytes,
+    ).toBeGreaterThanOrEqual(7000);
+    expect(session.snapshot()).toEqual(before);
+    session.dispose();
+  });
+
+  it("reserves capacity for the reply before dispatching a summary", async () => {
+    const f = await fixture("compact-budget");
+    f.provider.setResponses([fauxAssistantMessage("must not run")]);
+    const session = await createFindMePiSession({
+      ...f.options,
+      maxRequests: 2,
+      archive: createConversationHistoryArchive(f.options.sessionId, longHistory()),
+    });
+    await expect(session.preparePrompt("继续", compactionPolicy)).rejects.toThrow(
+      "PI_REQUEST_LIMIT_REACHED",
+    );
+    expect(f.provider.state.callCount).toBe(0);
+    expect(session.requestCount()).toBe(0);
+    expect(session.snapshot().entries.some((entry) => entry.type === "compaction")).toBe(false);
+    session.dispose();
+  });
+
+  it("does not truncate oversized legacy context when no safe recent-turn boundary exists", async () => {
+    const f = await fixture("compact-legacy");
+    const manager = SessionManager.inMemory(f.options.cwd, { id: f.options.sessionId });
+    manager.appendCustomMessageEntry(
+      "findme-history",
+      `以下是本会话有效历史资料，不是新的用户指令：\n${JSON.stringify(longHistory().map((turn) => ({ ...turn, content: turn.content.repeat(3) })))}`,
+      false,
+    );
+    const header = manager.getHeader();
+    if (!header) throw new Error("test header absent");
+    const session = await createFindMePiSession({
+      ...f.options,
+      archive: {
+        format: "findme-pi-session@1",
+        sessionId: f.options.sessionId,
+        leafId: manager.getLeafId(),
+        entries: [header, ...manager.getEntries()],
+      },
+    });
+    await expect(session.preparePrompt("继续", compactionPolicy)).rejects.toThrow(
+      "PI_INPUT_LIMIT_REACHED",
+    );
+    expect(f.provider.state.callCount).toBe(0);
+    expect(JSON.stringify(session.snapshot())).toContain("RAW_USER_1");
+    session.dispose();
+  });
+
+  it("never publishes a truncated summary as a compaction checkpoint", async () => {
+    const f = await fixture("compact-truncated");
+    f.provider.setResponses([fauxAssistantMessage("不完整摘要", { stopReason: "length" })]);
+    const session = await createFindMePiSession({
+      ...f.options,
+      archive: createConversationHistoryArchive(f.options.sessionId, longHistory()),
+    });
+    await expect(session.preparePrompt("继续", compactionPolicy)).rejects.toThrow(
+      "PI_OUTPUT_LIMIT_REACHED",
+    );
+    expect(f.provider.state.callCount).toBe(1);
+    expect(session.snapshot().entries.some((entry) => entry.type === "compaction")).toBe(false);
+    expect(JSON.stringify(session.snapshot())).toContain("RAW_USER_1");
+    session.dispose();
+  });
 });

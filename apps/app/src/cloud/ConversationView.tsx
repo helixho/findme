@@ -13,6 +13,8 @@ import type {
   GuidedQuestion,
   PriorSelectionView,
   ProcessingView,
+  ReplyMaterial,
+  ReplyMaterialsResponse,
   StartResponse,
 } from "../types";
 import { message } from "./shared";
@@ -96,6 +98,7 @@ function explain(error: unknown) {
     if (error.code === "CORE_MODEL_LIMIT_REACHED")
       return "最近 24 小时的自动处理次数已用完。你的输入已保存，稍后可以继续处理。";
     if (error.code === "LLM_UNAVAILABLE") return "自动处理尚未启用。你的输入已保存。";
+    if (error.code === "PI_USER_ABORTED") return "本轮已停止，输入已保存，可以稍后重新处理。";
     if (error.code === "STALE_VERSION") return "这次交流已在其他地方更新，请重新打开。";
     if (error.code === "STALE_CLAIM_REVISION")
       return "相关认识已经变化。你的输入已保存，请在当前认识上重新提交。";
@@ -133,6 +136,12 @@ export function ConversationView({
   // step is (asking, processing, failed or done).
   const [optimistic, setOptimistic] = useState("");
   const [replying, setReplying] = useState<string | null>(null);
+  const [activeReplyOperation, setActiveReplyOperation] = useState<{
+    id: string;
+    executionId: string;
+    explorationId: string;
+  } | null>(null);
+  const [cancellingReply, setCancellingReply] = useState(false);
   const initialSent = useRef<string | null>(null);
   const [thread, setThread] = useState<ExplorationView | null>(null);
   // Any new action or unmount invalidates pending reads from the previous view.
@@ -145,6 +154,8 @@ export function ConversationView({
     setError("");
     setOptimistic("");
     setReplying(null);
+    setActiveReplyOperation(null);
+    setCancellingReply(false);
   }
 
   const refresh = useCallback(async () => {
@@ -266,7 +277,7 @@ export function ConversationView({
         version: view.version,
         phase: view.phase,
         reading: view.latest_step ?? undefined,
-        claims: view.understanding.claims,
+        claims: [...view.understanding.claims, ...(view.understanding.needs_review ?? [])],
         gaps: view.understanding.gaps,
         processing: meta?.processing,
         prior_understanding: meta?.prior_understanding,
@@ -291,10 +302,13 @@ export function ConversationView({
         if (generation !== viewGeneration.current) return;
         const operation = await cloudRequest<{
           status: "processing" | "completed" | "failed" | "stale";
+          execution_id?: string;
+          can_cancel?: boolean;
           error?: { code?: string };
         }>(`/api/core/model-operations/${encodeURIComponent(operationId)}`);
         if (generation !== viewGeneration.current) return;
         if (operation.status !== "processing") {
+          setActiveReplyOperation(null);
           await resume(id, false, generation);
           if (generation !== viewGeneration.current) return;
           setReplying(null);
@@ -305,9 +319,17 @@ export function ConversationView({
           );
           return;
         }
+        if (operation.can_cancel && operation.execution_id)
+          setActiveReplyOperation({
+            id: operationId,
+            executionId: operation.execution_id,
+            explorationId: id,
+          });
+        else setActiveReplyOperation(null);
         await new Promise((resolve) => setTimeout(resolve, 1000));
       }
       if (generation === viewGeneration.current) {
+        setActiveReplyOperation(null);
         setReplying(null);
         setNotice(
           "消息已保存，回应等待时间较长。可以重新打开这段对话确认结果；重试会沿用同一请求。",
@@ -315,6 +337,7 @@ export function ConversationView({
       }
     } catch (e) {
       if (generation === viewGeneration.current) {
+        setActiveReplyOperation(null);
         setReplying(null);
         setNotice(
           `消息已保存，暂时无法读取处理状态。重新打开对话可确认结果，也可沿用同一请求重试。${explain(e)}`,
@@ -327,14 +350,29 @@ export function ConversationView({
   async function respond(id: string, version: number, sourceId: string) {
     const generation = viewGeneration.current;
     setReplying(sourceId);
+    setActiveReplyOperation(null);
     setNotice("回应正在生成，完成后会自动显示。");
     try {
-      const reply = await cloudMutation<Reply | { status: "processing"; operation_id: string }>(
-        `/api/core/explorations/${id}/reply`,
-        { expected_version: version, message_source_id: sourceId },
-      );
+      const reply = await cloudMutation<
+        | Reply
+        | {
+            status: "processing";
+            operation_id: string;
+            execution_id?: string;
+            can_cancel?: boolean;
+          }
+      >(`/api/core/explorations/${id}/reply?async=1`, {
+        expected_version: version,
+        message_source_id: sourceId,
+      });
       if (generation !== viewGeneration.current) return;
       if (isProcessingReply(reply)) {
+        if (reply.can_cancel && reply.execution_id)
+          setActiveReplyOperation({
+            id: reply.operation_id,
+            executionId: reply.execution_id,
+            explorationId: id,
+          });
         setNotice("回应正在生成，完成后会自动显示。");
         await resume(id, false);
         void pollReply(id, reply.operation_id, generation);
@@ -349,6 +387,48 @@ export function ConversationView({
       setReplying(null);
       setNotice(`消息已保存。${explain(e)}`);
       return resume(id, false);
+    }
+  }
+
+  async function stopReply() {
+    if (!activeReplyOperation || cancellingReply) return;
+    const active = activeReplyOperation;
+    const generation = viewGeneration.current;
+    let displayGeneration = generation;
+    let confirmed = false;
+    setCancellingReply(true);
+    try {
+      const result = await cloudMutation<{ status: string }>(
+        `/api/core/model-operations/${encodeURIComponent(active.id)}/cancel`,
+        { execution_id: active.executionId },
+      );
+      if (generation !== viewGeneration.current) return;
+      // Invalidate the old polling loop only after the server confirms the action.
+      const stoppedGeneration = ++viewGeneration.current;
+      displayGeneration = stoppedGeneration;
+      confirmed = true;
+      setBusy(false);
+      setActiveReplyOperation(null);
+      setReplying(null);
+      await resume(active.explorationId, false, stoppedGeneration);
+      if (stoppedGeneration !== viewGeneration.current) return;
+      setNotice(
+        result.status === "stopped"
+          ? "本轮已停止。消息已保存，可以稍后重新处理。"
+          : result.status === "completed"
+            ? "回应已生成。"
+            : "这次生成已结束，消息已保存。",
+      );
+      setCancellingReply(false);
+    } catch (e) {
+      if (displayGeneration === viewGeneration.current) {
+        setNotice(
+          confirmed
+            ? `生成状态已确认，消息已保存；暂时无法刷新对话。${explain(e)}`
+            : `暂未确认停止，仍在读取生成状态。${explain(e)}`,
+        );
+        setCancellingReply(false);
+      }
     }
   }
 
@@ -445,6 +525,16 @@ export function ConversationView({
         </p>
       )}
       {notice && <output className="conversation-notice">{notice}</output>}
+      {activeReplyOperation && (
+        <button
+          type="button"
+          className="button secondary"
+          disabled={cancellingReply}
+          onClick={() => void stopReply()}
+        >
+          {cancellingReply ? "正在停止……" : "停止本轮生成"}
+        </button>
+      )}
       {optimistic && (
         <div className="conversation-thread">
           <article className="thread-user">
@@ -725,6 +815,11 @@ export function ConversationView({
                 {step.data.claims.map((claim) => (
                   <li key={claim.claim_revision_id}>
                     {claim.text}
+                    {claim.pending_feedback ? (
+                      <p className="muted">本条存在待核对反馈，尚未判定原认识错误。</p>
+                    ) : claim.evidence_status !== "valid" ? (
+                      <p className="muted">这条认识的依据需要重新核对，暂不作为当前前提。</p>
+                    ) : null}
                     <br />
                     <span className="muted">
                       适用范围：{claim.scope} · 依据：{claim.confidence_basis}
@@ -1005,8 +1100,167 @@ function ThreadLog({ view }: { view: ExplorationView }) {
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{turn.content}</ReactMarkdown>
             </div>
           )}
+          {turn.role === "assistant" && turn.turnKind === "pi_reply" && (
+            <ReplyMaterials key={view.version} explorationId={view.id} turnId={turn.id} />
+          )}
         </article>
       ))}
     </div>
+  );
+}
+
+function ReplyMaterials({ explorationId, turnId }: { explorationId: string; turnId: string }) {
+  const [items, setItems] = useState<ReplyMaterial[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [unavailable, setUnavailable] = useState(0);
+  const [nextCursor, setNextCursor] = useState<number | null>(null);
+  const generation = useRef(0);
+  const requesting = useRef(false);
+  useEffect(
+    () => () => {
+      generation.current++;
+    },
+    [],
+  );
+  const endpoint = `/api/core/explorations/${encodeURIComponent(explorationId)}/replies/${encodeURIComponent(turnId)}/materials`;
+  async function loadPage(cursor = 0, reset = false) {
+    if (requesting.current) return;
+    requesting.current = true;
+    const requestGeneration = ++generation.current;
+    setLoading(true);
+    setError("");
+    if (reset) {
+      setItems([]);
+      setLoaded(false);
+      setUnavailable(0);
+      setNextCursor(null);
+    }
+    try {
+      const page = await cloudRequest<ReplyMaterialsResponse>(`${endpoint}?cursor=${cursor}`);
+      if (requestGeneration !== generation.current) return;
+      setItems((old) =>
+        reset
+          ? page.items
+          : [
+              ...old,
+              ...page.items.filter(
+                (item) => !old.some((prior) => prior.source_id === item.source_id),
+              ),
+            ],
+      );
+      setUnavailable((old) => (reset ? page.unavailable_in_page : old + page.unavailable_in_page));
+      setNextCursor(page.next_cursor);
+      setLoaded(true);
+    } catch {
+      if (requestGeneration === generation.current) setError("参考材料暂时读不到，可以重试。");
+    } finally {
+      if (requestGeneration === generation.current) {
+        setLoading(false);
+        requesting.current = false;
+      }
+    }
+  }
+  async function loadText(item: ReplyMaterial) {
+    if (requesting.current || item.next_text_offset === null) return;
+    requesting.current = true;
+    const requestGeneration = ++generation.current;
+    setLoading(true);
+    setError("");
+    try {
+      const page = await cloudRequest<ReplyMaterialsResponse>(
+        `${endpoint}?source_id=${encodeURIComponent(item.source_id)}&start=${item.next_text_offset}`,
+      );
+      if (requestGeneration !== generation.current) return;
+      const more = page.items.find((next) => next.source_id === item.source_id);
+      if (more)
+        setItems((old) =>
+          old.map((prior) =>
+            prior.source_id === item.source_id
+              ? { ...more, start: prior.start, text: prior.text + more.text }
+              : prior,
+          ),
+        );
+      else {
+        setItems((old) => old.filter((prior) => prior.source_id !== item.source_id));
+        setUnavailable((old) => old + 1);
+      }
+    } catch {
+      if (requestGeneration === generation.current) setError("原文后续暂时读不到，可以重试。");
+    } finally {
+      if (requestGeneration === generation.current) {
+        setLoading(false);
+        requesting.current = false;
+      }
+    }
+  }
+  const author = (kind: string) =>
+    (
+      ({
+        subject: "本人",
+        assistant: "助手",
+        other: "他人",
+        unknown: "未知",
+        mixed: "混合",
+      }) as Record<string, string>
+    )[kind] ?? "未知";
+  return (
+    <details
+      className="reply-materials"
+      onToggle={(event) => {
+        if (event.currentTarget.open) void loadPage(0, true);
+      }}
+    >
+      <summary>参考材料</summary>
+      <p className="muted">这是本轮参考的材料范围，并不表示每条都支持回答。</p>
+      {items.map((item) => (
+        <article key={item.source_id}>
+          <p className="muted">
+            来源作者：{author(item.author_kind)} · 记录于{" "}
+            {new Date(item.recorded_at).toLocaleString("zh-CN")}
+          </p>
+          <blockquote style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+            {item.text}
+          </blockquote>
+          {item.next_text_offset !== null && (
+            <button
+              type="button"
+              className="button secondary"
+              disabled={loading}
+              onClick={() => void loadText(item)}
+            >
+              继续看这条原文
+            </button>
+          )}
+        </article>
+      ))}
+      {loaded && !items.length && <p className="muted">当前没有可展示的参考材料。</p>}
+      {unavailable > 0 && <p className="muted">部分材料已不可用，不再展示原文。</p>}
+      {error && (
+        <p role="alert">
+          {error}{" "}
+          <button
+            type="button"
+            className="button secondary"
+            disabled={loading}
+            onClick={() => void loadPage(0, true)}
+          >
+            重试读取
+          </button>
+        </p>
+      )}
+      {loading && <output>正在读取参考材料……</output>}
+      {nextCursor !== null && (
+        <button
+          type="button"
+          className="button secondary"
+          disabled={loading}
+          onClick={() => void loadPage(nextCursor)}
+        >
+          查看更多材料
+        </button>
+      )}
+    </details>
   );
 }

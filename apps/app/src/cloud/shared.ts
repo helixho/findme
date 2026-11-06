@@ -99,6 +99,8 @@ const modelErrors: Record<string, string> = {
   PI_INPUT_LIMIT_REACHED: "本轮材料超过处理上限，原文已保存。",
   PI_USER_ABORTED: "本轮已停止，输入已保存，可以继续聊。",
   PI_MODEL_ERROR: "模型暂未完成回应，输入已保存。",
+  PI_CONTEXT_COMPACTION_FAILED: "较早的对话暂未整理完成，原文已保存，可以稍后重新处理。",
+  PI_REVISION_STALE_DEPENDENCY: "相关认识已变化，请刷新后重新处理。",
   PI_RECORD_FAILED: "本轮记录未保存完成，输入已保存。",
   PI_REPLY_FORMAT_INVALID: "模型未返回可用回应，输入已保存。",
   PI_SESSION_BUSY: "这个会话正在回应，请稍后继续。",

@@ -1,9 +1,15 @@
 import { CoreReportTarget } from "@findme/core";
 import { type Db, coreSchema } from "@findme/db";
-import { and, desc, eq } from "drizzle-orm";
-import { orderStoredConversationTurns } from "./conversation-context.js";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { z } from "zod";
+import { lockPiProfileState, withProfileTransaction } from "../cloud-diagnostic/scope.js";
+import {
+  orderStoredConversationTurns,
+  qualifyConversationSources,
+} from "./conversation-context.js";
 import { loadPendingInputs } from "./conversation.js";
 import { PURPOSEFUL_EXPLORATION_POLICY } from "./epistemic-policy.js";
+import { CoreError } from "./errors.js";
 import { deriveExplorationPhase, hasPriorProcessing } from "./exploration-context.js";
 import {
   buildEvidenceView,
@@ -15,6 +21,7 @@ import {
   loadOpenQuestion,
 } from "./exploration-reading.js";
 import type { PersonalContext } from "./exploration-types.js";
+import { pendingFeedbackRevisionIds } from "./pending-feedback.js";
 
 export async function getCurrentUnderstanding(db: Db, ctx: PersonalContext) {
   const rows = await db
@@ -47,6 +54,11 @@ export async function getCurrentUnderstanding(db: Db, ctx: PersonalContext) {
     )
     .orderBy(desc(coreSchema.claimRevisions.createdAt));
 
+  const pendingFeedback = await pendingFeedbackRevisionIds(
+    db,
+    ctx,
+    rows.map((row) => row.revisionId),
+  );
   const mapClaim = (row: (typeof rows)[number]) => ({
     claim_id: row.claimId,
     claim_revision_id: row.revisionId,
@@ -57,14 +69,19 @@ export async function getCurrentUnderstanding(db: Db, ctx: PersonalContext) {
     text: row.text,
     scope: row.scope,
     evidence_status: row.evidenceStatus,
+    pending_feedback: pendingFeedback.has(row.revisionId),
     confidence_level: row.confidenceLevel,
     confidence_basis: row.confidenceBasis,
     invalidation_reason: row.invalidationReason,
     updated_at: row.createdAt,
   });
 
-  const claims = rows.filter((row) => row.evidenceStatus === "valid").map(mapClaim);
-  const needsReview = rows.filter((row) => row.evidenceStatus !== "valid").map(mapClaim);
+  const claims = rows
+    .filter((row) => row.evidenceStatus === "valid" && !pendingFeedback.has(row.revisionId))
+    .map(mapClaim);
+  const needsReview = rows
+    .filter((row) => row.evidenceStatus !== "valid" || pendingFeedback.has(row.revisionId))
+    .map(mapClaim);
   const state = claims.length > 0 ? "current" : needsReview.length > 0 ? "needs_review" : "empty";
 
   return {
@@ -110,8 +127,12 @@ export async function getExplorationView(db: Db, ctx: PersonalContext, explorati
       loadPendingInputs(db, ctx, exploration.id),
     ]);
 
-  const validClaims = claims.filter((claim) => claim.evidenceStatus === "valid");
-  const needsReview = claims.filter((claim) => claim.evidenceStatus !== "valid");
+  const validClaims = claims.filter(
+    (claim) => claim.evidenceStatus === "valid" && !claim.pendingFeedback,
+  );
+  const needsReview = claims.filter(
+    (claim) => claim.evidenceStatus !== "valid" || claim.pendingFeedback,
+  );
   const phase = deriveExplorationPhase({
     status: exploration.status,
     openQuestion,
@@ -142,6 +163,7 @@ export async function getExplorationView(db: Db, ctx: PersonalContext, explorati
     text: claim.text,
     scope: claim.scope,
     evidence_status: claim.evidenceStatus,
+    pending_feedback: claim.pendingFeedback,
     confidence_level: claim.confidenceLevel,
     confidence_basis: claim.confidenceBasis,
     invalidation_reason: claim.invalidationReason,
@@ -288,4 +310,126 @@ export async function listExplorations(
     });
   }
   return { items };
+}
+
+/** The dependency set is a reading range, never statement-by-statement support. */
+export async function getReplyMaterials(
+  db: Db,
+  ctx: PersonalContext,
+  explorationId: string,
+  replyTurnId: string,
+  input: { cursor?: number; limit?: number; sourceId?: string; start?: number } = {},
+) {
+  const query = z
+    .object({
+      cursor: z.number().int().nonnegative().default(0),
+      limit: z.number().int().min(1).max(20).default(8),
+      sourceId: z.string().uuid().optional(),
+      start: z.number().int().nonnegative().default(0),
+    })
+    .parse(input);
+  return withProfileTransaction(db, ctx, async (tx) => {
+    // Match source lifecycle's lock order so eligibility and returned text cannot
+    // straddle an exclusion; this transaction contains no network/model call.
+    await lockPiProfileState(tx, ctx);
+    await loadExploration(tx as unknown as Db, ctx, explorationId);
+    const [turn] = await tx
+      .select({ id: coreSchema.explorationTurns.id })
+      .from(coreSchema.explorationTurns)
+      .where(
+        and(
+          eq(coreSchema.explorationTurns.id, replyTurnId),
+          eq(coreSchema.explorationTurns.explorationId, explorationId),
+          eq(coreSchema.explorationTurns.role, "assistant"),
+          eq(coreSchema.explorationTurns.turnKind, "pi_reply"),
+          sql`length(${coreSchema.explorationTurns.content}) > 0`,
+        ),
+      )
+      .limit(1);
+    if (!turn) throw new CoreError("NOT_FOUND", 404, "这条回应的参考材料暂不可用");
+    const owners = await tx
+      .select({ meta: coreSchema.sourceItems.sourceMeta })
+      .from(coreSchema.sourceItems)
+      .where(
+        and(
+          eq(coreSchema.sourceItems.tenantId, ctx.tenantId),
+          eq(coreSchema.sourceItems.subjectId, ctx.subjectId),
+          sql`${coreSchema.sourceItems.sourceMeta}->>'exploration_id'=${explorationId}`,
+          sql`${coreSchema.sourceItems.sourceMeta}->'reply'->>'turn_id'=${replyTurnId}`,
+        ),
+      )
+      .limit(2);
+    const parsed = z
+      .object({ engine: z.literal("pi"), source_ids: z.array(z.string().uuid()) })
+      .safeParse(owners.length === 1 ? owners[0]?.meta?.reply : null);
+    if (!parsed.success) throw new CoreError("NOT_FOUND", 404, "这条回应的参考材料暂不可用");
+    const sourceIds = [...new Set(parsed.data.source_ids)];
+    if (query.sourceId && !sourceIds.includes(query.sourceId))
+      throw new CoreError("NOT_FOUND", 404, "这条回应没有对应材料");
+    const pageIds = query.sourceId
+      ? [query.sourceId]
+      : sourceIds.slice(query.cursor, query.cursor + query.limit);
+    const qualified = await qualifyConversationSources(tx as unknown as Db, ctx, pageIds, true);
+    const sources = pageIds.length
+      ? await tx
+          .select({
+            id: coreSchema.sourceItems.id,
+            content: coreSchema.sourceItems.content,
+            authorKind: coreSchema.sourceItems.authorKind,
+            sourceKind: coreSchema.sourceItems.sourceKind,
+            capturedAt: coreSchema.sourceItems.capturedAt,
+            occurredAt: coreSchema.sourceItems.occurredAt,
+          })
+          .from(coreSchema.sourceItems)
+          .where(
+            and(
+              eq(coreSchema.sourceItems.tenantId, ctx.tenantId),
+              eq(coreSchema.sourceItems.subjectId, ctx.subjectId),
+              inArray(coreSchema.sourceItems.id, pageIds),
+            ),
+          )
+      : [];
+    const items = pageIds.flatMap((id) => {
+      const source = sources.find((source) => source.id === id);
+      if (!source || !qualified.get(id)?.readable) return [];
+      let start = Math.min(query.sourceId ? query.start : 0, source.content.length);
+      if (
+        start > 0 &&
+        /[\uDC00-\uDFFF]/.test(source.content[start] ?? "") &&
+        /[\uD800-\uDBFF]/.test(source.content[start - 1] ?? "")
+      )
+        start++;
+      let end = Math.min(start + 2000, source.content.length);
+      if (
+        end < source.content.length &&
+        /[\uD800-\uDBFF]/.test(source.content[end - 1] ?? "") &&
+        /[\uDC00-\uDFFF]/.test(source.content[end] ?? "")
+      )
+        end--;
+      return [
+        {
+          source_id: source.id,
+          author_kind: source.authorKind,
+          source_kind: source.sourceKind,
+          recorded_at: source.capturedAt,
+          occurred_at: source.occurredAt,
+          text: source.content.slice(start, end),
+          start,
+          end,
+          next_text_offset: end < source.content.length ? end : null,
+        },
+      ];
+    });
+    return {
+      reply_turn_id: replyTurnId,
+      qualification: "reference_range_not_statement_support" as const,
+      total_sources: sourceIds.length,
+      unavailable_in_page: pageIds.length - items.length,
+      items,
+      next_cursor:
+        !query.sourceId && query.cursor + query.limit < sourceIds.length
+          ? query.cursor + query.limit
+          : null,
+    };
+  });
 }

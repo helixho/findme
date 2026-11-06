@@ -63,6 +63,11 @@ ${JSON.stringify(policyPromptPayload(), null, 2)}
 
 只输出指定 JSON 结构，严格 JSON。`;
 
+const INTERACTION_PREFERENCE_RULES = `
+交互偏好是可选的 value / self_report 认识，只处理本人明确表达的提问、篇幅或呈现偏好，不从行为或心理解释推断。显式更新或纠正时，可在该claim加 interaction_preference：
+{"evidence_key":"对应本人直接支持的证据key","original_text":"证据中的逐字原话","scope":{"kind":"conversation"},"scope_quote":"若明确扩大适用范围，引用该范围的逐字原话"}。
+没有偏好时省略该字段。evidence中同一key必须是supports/direct。本人明确只针对本轮/本次回答时用scope:{"kind":"turn"}，程序绑定该偏好证据来源；不能把本轮要求延长为整段会话。无法确认范围时用conversation，程序绑定当前会话；不能编造topic/task编号。仅明确长期交流要求才可提议scope:{"kind":"default","explicitlyLongTerm":true}，同时给scope_quote；程序保守核对，未确认则留在本会话，不靠布尔值升级。长期范围的可识别直接表达如“以后所有对话，请…”；其他措辞仍保留完整原话供核对，不自动推广。旧偏好元数据只是上下文；修订时依据本次实际原文重新提出、收窄或省略，不能仅复制旧范围。`;
+
 const UNDERSTANDING_PROMPT = `你是 FindMe 的认识整理器。
 输入包含一组带 evidence key 的材料。形成当前可修订的理解，而不是人格报告。
 
@@ -84,6 +89,8 @@ const UNDERSTANDING_PROMPT = `你是 FindMe 的认识整理器。
 - claims 可以为 0；证据不足时不要为了填满结果硬造 claim。
 - claims 最多 4 条，gaps 最多 4 个；如果 claims=0，则 gaps 至少 1 个。
 - confidence_level / confidence_basis 描述系统对该条具体 Claim 的依据，不是用户自身的确信程度。对自述有充分依据，不代表自述中的事实或因果已被证实。
+
+${INTERACTION_PREFERENCE_RULES}
 
 ${EXPRESSION_FIDELITY_RULES}
 
@@ -161,6 +168,8 @@ const REVISION_PROMPT = `你是 FindMe 的认识修订器。
 - 每一个 CURRENT_CLAIMS_TO_REVISE 的 key 都必须出现在 claims[].key 或 withdrawn_claim_keys 中。
 - change_summary 说明改了什么；revision_reason 说明为什么改。
 - 用户从“确定”改为“倾向／直觉”时，修订其原有限定和时间范围，不沿用旧的确定语气；这种态度变化本身既不证实也不证伪原判断。confidence_level / confidence_basis 仍只描述系统对修订后具体 Claim 的依据。
+
+${INTERACTION_PREFERENCE_RULES}
 
 ${EXPRESSION_FIDELITY_RULES}
 
