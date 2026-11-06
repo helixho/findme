@@ -556,3 +556,40 @@ ACTIONS["trial-save"] = (el) => {
   toast("回顾已保存");
   render();
 };
+
+
+/* 日常聊天原型：复用原型状态与路由，不接入正式接口。 */
+function chatSessions() {
+  if (!state.chats) state.chats = [
+    {id:"project", title:"周五的项目，要不要接？", messages:[
+      {role:"user",text:"朋友邀我周五接一个品牌拍摄项目。题材有意思，但只说拍一天，没讲清楚后期改几轮。我想接，又怕整个周末都搭进去。"},
+      {role:"assistant",html:"<p>你犹豫的地方，似乎不是项目有没有吸引力，而是<strong>答应一天，会不会连带答应一个没有边界的周末</strong>。</p><p>这两件事可以分开看：</p><ul><li><strong>想接：</strong>你明确说题材有意思，这部分兴趣有依据。</li><li><strong>担心：</strong>后期修改次数还没说清，投入多少时间确实未知。但目前也不能认定朋友一定会不断加要求。</li></ul><p>所以，比起现在就选接或不接，更有用的是先弄清这次承诺的范围。你不必为了保留兴趣，连不确定的部分也一起答应。</p><blockquote>这里只针对这次合作，不代表你一贯不善于拒绝。</blockquote>"}
+    ]},
+    {id:"weekend",title:"一个没有安排的周末",messages:[{role:"user",text:"这个周末没有安排。我有点期待，也有点不知道怎么过，先不用帮我列计划。"},{role:"assistant",html:"<p>期待和不知道怎么过可以同时存在。你现在还不需要把空闲填满，也不用马上决定怎样才算过得值得。</p><p>我们可以先留在这种感觉里，等你想多说一点时再接着聊。</p>"}]}
+  ];
+  return state.chats;
+}
+function chatComposer(id, home=false) {
+  const t=chatSessions().find(t=>t.id===id);
+  return `<div class="daily-composer ${home?'home-composer':''}"><label class="sr-only" for="chat-draft">${home?'聊件新的':'接着说'}</label><textarea id="chat-draft" rows="${home?3:2}" placeholder="${home?'说一件现在在意的事……':'接着说，也可以直接纠正我……'}" oninput="state.drafts['chat-${id}']=this.value;save()">${esc(state.drafts['chat-'+id]||'')}</textarea><div class="composer-foot"><span class="small muted">${home?'不用先整理好再说':'Shift + Enter 换行 · 按发送提交'}</span><button class="button primary" data-action="chat-send" data-id="${id}" ${t?.status==='waiting'?'disabled':''}>发送 ↑</button></div></div>`;
+}
+VIEWS.chat = r => {
+  const sessions=chatSessions(); const id=r.a||'new'; const t=sessions.find(t=>t.id===id);
+  return {title:t?.title||"聊件新的",nav:"home",body:`<div class="daily-chat-layout"><aside class="talk-sidebar">${link('chat/new','＋ 聊件新的','button quiet')}<h2>最近对话</h2>${sessions.map(s=>link('chat/'+s.id,esc(s.title),s.id===id?'talk-link selected':'talk-link')).join('')}${link('home','← 回到首页','text-button')}</aside><section class="daily-chat"><header class="talk-heading"><div>${link('home','← 首页','text-button small')}<h1>${esc(t?.title||'聊件新的')}</h1></div><details><summary aria-label="对话选项">更多</summary><button class="button quiet small" data-action="chat-understanding">更新认识</button></details></header>
+    <div class="talk-messages" aria-live="polite">${!t?'<div class="chat-empty"><h2>从你想说的开始。</h2><p class="muted">不必先选主题，也不必马上找到答案。</p></div>':t.messages.map(m=>`<article class="talk-message ${m.role}"><span class="speaker">${m.role==='user'?'你':'FindMe'}</span><div>${m.html||'<p>'+esc(m.text)+'</p>'}</div></article>`).join('')}
+    ${t?.status==='waiting'?'<div class="reply-state" role="status">正在回应，刚才的话已保存在此原型中。<button class="text-button" data-action="chat-finish" data-id="'+id+'">查看示例回应</button></div>':''}
+    ${t?.status==='failed'?'<div class="reply-state failed" role="alert">这次没有收到回应，你的话还在。<button class="button quiet small" data-action="chat-retry" data-id="'+id+'">重新回应</button></div>':''}
+    ${t?.updated?'<details class="chat-change"><summary>这次更新了 1 条认识 · 示例</summary><p>在这次拍摄合作中，你希望先明确修改次数和交付范围，再决定是否承接。</p><p class="muted">依据：本对话首条原话。适用范围仅为这次合作。</p><p>这是设计示例，不是根据新输入生成的认识。</p></details>':''}</div>
+    ${chatComposer(id)}<details class="chat-demo-controls"><summary>试看其他状态 · 仅原型</summary><div class="actions"><button class="button quiet small" data-action="chat-wait" data-id="${id}">等待回应</button><button class="button quiet small" data-action="chat-fail" data-id="${id}">回应失败</button><button class="button quiet small" data-action="chat-change" data-id="${id}">认识变化</button></div><p class="small muted">所有回应是预设示例，不分析你的输入。</p></details>
+    </section></div>`};
+};
+ACTIONS['chat-send']=el=>{
+ const text=$('#chat-draft').value.trim();if(!text)return;
+ let t=chatSessions().find(t=>t.id===el.dataset.id);
+ if(!t){t={id:'local-'+Date.now(),title:text.slice(0,24),messages:[]};state.chats.unshift(t);}
+ t.messages.push({role:'user',text});t.status='waiting';state.drafts['chat-'+el.dataset.id]='';save();go('chat/'+t.id);
+};
+ACTIONS['chat-finish']=el=>{const t=chatSessions().find(t=>t.id===el.dataset.id);if(!t||t.status!=='waiting')return;t.messages.push({role:'assistant',html:'<p><strong>这是一条预设回应，用来试读对话排版。</strong></p><p>正式接入后，这里会根据你的消息回应；本原型没有调用模型，也不会把刚才的输入写入 FindMe。</p><p>你可以再发一条消息，或者切到另一段对话后回来。</p>'});t.status=null;save();render();};
+for (const [name,status] of [['chat-wait','waiting'],['chat-fail','failed'],['chat-retry','waiting']]) ACTIONS[name]=el=>{const t=chatSessions().find(t=>t.id===el.dataset.id);if(!t){toast('先发送一条消息，再试这个状态');return;}t.status=status;save();render();};
+ACTIONS['chat-change']=el=>{const t=chatSessions().find(t=>t.id===el.dataset.id);if(!t)return;t.updated=!t.updated;save();render();};
+ACTIONS['chat-understanding']=()=>openDialog('#modal',`${dialogHead('按需整理这段对话')}<div class="dialog-body"><p>日常聊天会保留原话，不必每次都更新认识。</p><p>这里预览主动整理的入口，原型不会生成或修改认识。</p><button class="button primary" data-action="close-dialog">回到对话</button></div>`);

@@ -2250,3 +2250,57 @@ dialog.modal {
     max-width: calc(100% - 40px);
   }
 }
+
+/* 日常交流：共享 B 方向配色，减少报告卡片。 */
+.daily-home { max-width: 860px; margin: 36px auto 64px; }
+.daily-heading { margin: 0 0 32px; }
+.daily-heading h1 { font-size: clamp(28px, 4vw, 42px); margin: 14px 0; }
+.eyebrow { color: var(--muted); font-size: 12px; letter-spacing: .13em; }
+.daily-composer { background: var(--panel); border: 1px solid var(--line-strong); border-radius: 18px; padding: 16px; }
+.daily-composer textarea { display: block; width: 100%; min-height: 60px; resize: vertical; border: 0; background: transparent; color: var(--ink); font: inherit; line-height: 1.7; padding: 0; box-shadow: none; }
+.composer-foot { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:12px; }
+.recent-talks { margin-top: 52px; }
+.recent-talk { display:flex; justify-content:space-between; gap:20px; padding:24px 0; border-bottom:1px solid var(--line); color:var(--ink); text-decoration:none; }
+.recent-talk h3 { font-size:19px; margin:0 0 8px; }
+.recent-talk p { color:var(--muted); margin:0; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.recent-talk:hover h3 { color:var(--accent-text); }
+.daily-bottom { display:flex; align-items:center; justify-content:space-between; gap:20px; margin:44px 0 36px; }
+.daily-bottom h3 { margin-bottom:6px; }
+.daily-chat-layout { display:grid; grid-template-columns:220px minmax(0,780px); gap:52px; justify-content:center; }
+.talk-sidebar { padding-top:24px; }
+.talk-sidebar h2 { font-size:12px; color:var(--muted); margin:30px 12px 10px; }
+.talk-link { display:block; padding:12px; border-radius:10px; color:var(--text); text-decoration:none; font-size:14px; margin-bottom:6px; }
+.talk-link.selected { background:var(--raised); color:var(--ink); }
+.talk-sidebar>.text-button { display:inline-block; margin:24px 12px; }
+.talk-heading { display:flex; justify-content:space-between; align-items:center; gap:20px; padding:16px 0 24px; border-bottom:1px solid var(--line); }
+.talk-heading h1 { font-size:23px; margin:12px 0 0; }
+.talk-heading details { position:relative; }
+.talk-heading details button { position:absolute; right:0; z-index:3; background:var(--panel); white-space:nowrap; }
+.talk-message { margin:30px 0; font-size:16px; line-height:1.8; }
+.talk-message .speaker { display:block; font-size:12px; color:var(--muted); margin-bottom:10px; }
+.talk-message.user { margin-left:12%; padding:16px 22px; border-radius:18px 18px 4px 18px; background:var(--raised); }
+.talk-message p { margin:0 0 16px; white-space:pre-wrap; }
+.talk-message p:last-child { margin-bottom:0; }
+.talk-message li { margin:12px 0; }
+.talk-message blockquote { margin:24px 0; padding:4px 18px; border-left:2px solid var(--line-strong); color:var(--muted); }
+.daily-chat>.daily-composer { position:sticky; bottom:16px; z-index:2; box-shadow:0 -12px 24px var(--bg); }
+.chat-demo-controls { margin:22px 0; font-size:12px; color:var(--muted); }
+.chat-demo-controls .actions { margin-top:12px; }
+.chat-empty { padding:70px 0; text-align:center; }
+.reply-state { padding:18px; margin:18px 0; background:var(--raised); border-radius:12px; }
+.reply-state button { margin-left:12px; }
+.reply-state.failed { border-left:3px solid var(--danger); }
+.chat-change { padding:16px 0; border-top:1px solid var(--line); margin-bottom:24px; }
+@media(max-width:760px) {
+ .daily-home { margin:20px auto; }
+ .daily-chat-layout { display:block; }
+ .talk-sidebar { display:flex; overflow:auto; gap:8px; padding:0 0 12px; }
+ .talk-sidebar h2,.talk-sidebar>.text-button { display:none; }
+ .talk-sidebar a { white-space:nowrap; margin:0; }
+ .daily-bottom { align-items:flex-start; flex-direction:column; gap:8px; }
+ .talk-heading h1 { font-size:21px; }
+ .talk-message.user { margin-left:6%; padding:14px 16px; }
+ .daily-chat>.daily-composer { bottom:calc(72px + env(safe-area-inset-bottom)); }
+ .composer-foot .small { font-size:11px; }
+ .daily-composer { padding:12px; }
+}

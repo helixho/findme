@@ -50,55 +50,15 @@ function claimCard(id, { old = false, showTopic = false } = {}) {
   </article>`;
 }
 
-VIEWS.home = () => {
-  if (!state.hasData) return zeroHome();
-  const n = pendingCount();
-  const summary = state.revised
-    ? "目标明确、可以自主安排时，你更容易持续投入。协作中的迟疑和职责是否清楚有关：新的补充表明，分工明确后你也会主动承担。"
-    : "目标明确、可以自主安排时，你更容易持续投入。协作中的迟疑还不能简单归因于“不愿参与”，当时的分工与决策边界值得先弄清楚。";
-  const ask = state.revised
-    ? {
-        h: "先留意一个空白",
-        p: "投入顺畅之后，恢复得怎么样？现有材料没有覆盖精力与休息。",
-        r: "explore/start",
-        l: "从一件经历补充",
-      }
-    : {
-        h: "先保留一个问号",
-        p: "迟疑是不愿参与，还是职责还不清楚？这个解释需要你知道的背景。",
-        r: "correct/J1",
-        l: "补充这条判断",
-      };
-  return {
-    title: "首页",
-    nav: "home",
-    body: `
-    <section class="hero">
-      <div>
-        <div class="meta"><span>我的当前理解</span>${tag(`整体版本 ${version("overall")}`, "current")}<span>截至 2026年10月${state.revised ? "27" : "12"}日</span></div>
-        <h1>投入需要空间，<br>也需要清晰的边界。</h1>
-        <p class="lead">${summary}</p>
-        <div class="actions">${link("understand", "阅读整体认识", "button primary")}${link("understand/topics", "按专题阅读", "text-button")}</div>
-      </div>
-      <aside class="hero-side" aria-label="覆盖范围与值得澄清的事">
-        <div class="kv"><span>覆盖材料</span><strong>2024年3月—2026年9月</strong></div>
-        <div class="kv"><span>来源</span><strong>3 批，已排除 1 批</strong></div>
-        <div class="rule"></div>
-        <h3>${ask.h}</h3><p>${ask.p}</p>
-        ${link(ask.r, ask.l, "text-button accent")}
-      </aside>
-    </section>
-    <section class="notes" aria-label="摘要">
-      <div class="note">${icon("scope")}<div><h3>有利条件</h3><p>清晰的目标与可自主安排的空间，可能帮助你投入。</p></div></div>
-      <div class="note">${icon("question")}<div><h3>仍然未知</h3><p>高频沟通下的投入，以及投入之后的恢复成本。</p></div></div>
-    </section>
-    ${n ? `<a class="clarify" href="#pending">${icon("clock")}<div class="copy"><h3>${pendingSummary()}</h3><p>可以稍后处理；本次标签页内保留，重置原型会清空。</p></div>${icon("right")}</a>` : ""}
-    <section class="section">
-      <div class="section-heading"><h2>从整体，走进具体</h2>${link("understand/topics", "全部专题", "text-button")}</div>
-      <div class="grid-2">${Object.keys(TOPICS).map(topicCard).join("")}</div>
-    </section>`,
-  };
-};
+VIEWS.home = () => ({
+  title: "今天想聊什么", nav: "home",
+  body: `<section class="daily-home"><div class="daily-heading"><span class="eyebrow">FINDME · 日常商量</span><h1>今天，想从哪里说起？</h1><p class="muted">一个问题，一点近况，或者还没想清楚的念头。</p></div>
+  ${chatComposer("new", true)}
+  <section class="recent-talks"><div class="section-heading"><h2>接着聊</h2>${link("chat/new", "聊件新的 ＋", "text-button")}</div>
+  ${chatSessions().map(t => link(`chat/${t.id}`, `<div><h3>${esc(t.title)}</h3><p>${esc(t.messages.filter(m=>m.role==='user').at(-1)?.text || '还没开始，随时说')}</p></div><span>${icon("right")}</span>`, "recent-talk")).join("")}</section>
+  <div class="daily-bottom"><div><h3>慢慢认识自己</h3><p class="muted">理解可以修改，不需要每次聊天都得出结论。</p></div>${link("understand", "看看已有认识 →", "text-button")}</div>
+  <p class="small muted">交互原型 · 虚构示例 · 输入仅保留在当前浏览器标签页，不调用模型。</p></section>`
+});
 function pendingSummary() {
   const c = state.corrections.filter((x) => x.status !== "done").length;
   const t = state.trials.filter((x) => x.status === "active").length;
