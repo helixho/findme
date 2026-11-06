@@ -223,6 +223,14 @@ export class ProfilePurgeService {
             ),
           );
         await tx
+          .delete(c.piSessionArchives)
+          .where(
+            and(
+              eq(c.piSessionArchives.tenantId, ctx.tenantId),
+              eq(c.piSessionArchives.subjectId, ctx.subjectId),
+            ),
+          );
+        await tx
           .delete(c.coreOperations)
           .where(
             and(

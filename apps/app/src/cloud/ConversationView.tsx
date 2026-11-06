@@ -248,7 +248,7 @@ export function ConversationView({ resumeId }: { resumeId?: string | null } = {}
     if (resumeId) void run(() => resume(resumeId, false));
   }, [refresh, resumeId]);
 
-  /** Reply to a saved message; new facts then update the understanding. */
+  /** Ordinary chat only replies; understanding is updated on explicit request. */
   async function respond(id: string, version: number, sourceId: string) {
     try {
       const reply = await cloudMutation<Reply | { status: "processing" }>(
@@ -259,13 +259,9 @@ export function ConversationView({ resumeId }: { resumeId?: string | null } = {}
         setNotice("回应仍在生成，稍后刷新查看。");
         return resume(id, false);
       }
-      // Show the reply first; updating the understanding only changes the
-      // analysis part below it, and a pending update survives a reload.
       await resume(id, false);
-      if (reply.new_information) {
-        setNotice("这次补充带来了新信息，正在据此更新认识。");
-        await proceed(id, reply.version);
-      }
+      if (reply.new_information)
+        setNotice("新信息已保存在对话里。需要时可以单独更新认识，也可以继续聊。");
     } catch (e) {
       setNotice(`消息已保存。${explain(e)}`);
       return resume(id, false);
@@ -450,8 +446,7 @@ export function ConversationView({ resumeId }: { resumeId?: string | null } = {}
                   reply_first: true,
                 });
                 setEvent("");
-                // Answer the request first; exploration follows only when the
-                // message brings facts worth adding to the understanding.
+                // Start with a reply. Understanding updates are a separate choice.
                 if (started.event_source_id)
                   await respond(
                     started.exploration.id,
@@ -727,7 +722,7 @@ export function ConversationView({ resumeId }: { resumeId?: string | null } = {}
 
           {!!step.data.view?.pending?.updates?.length && (
             <div className="conversation-saved">
-              <p>你补充的新信息还没有更新到认识里。</p>
+              <p>补充内容已保存在对话里，尚未单独整理为认识；可以继续聊，也可以按需更新。</p>
               <button
                 type="button"
                 className="button secondary"

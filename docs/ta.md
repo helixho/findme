@@ -10,7 +10,7 @@
 
 正式产品默认是账号制云端服务，手机与电脑消费同一 Core API、对话、个人理解、证据和诊断状态。唯一客户端为 `apps/app` 浏览器单页应用（SPA），手机 H5 与桌面同代码，不是原生安装包。独立 `apps/web`、`apps/miniapp` 及 Taro 工具链按 [ADR D25](adr.md#d25-直接退役两个独立客户端统一使用-appsapp-浏览器入口) 退役，不以迁移全部旧功能为前置；App 自身 native/private/diagnostic-preview/dogfood 兼容分支保留。Android/Capacitor 包装工程与 APK 构建链已退役。AV/Codex CLI/本机查看器仅为可选采集和研究工具，不要求普通用户安装、登录开发工具或保持电脑在线。
 
-第一阶段复用来源、认识、会话、报告和任务机制，贯通同一入口中的读取、对话、新信息、纠正与恢复。旧资源名或模型供应商不构成新需求的前提。
+第一阶段复用来源、认识、会话、报告和任务机制，以持续多会话和跨会话原文读取为主，按需形成或修订认识。pi 会话也是数据库归档的来源，来源与运行状态的分工见 [Agent 设计](implementation/personal-understanding-agent.md#会话切分与记忆召回)。旧资源名或模型供应商不构成新需求的前提。
 
 本地开发与验证使用测试运行器创建的临时 PostgreSQL；不把常驻本机数据库或旧 Box runtime 恢复为本人正式入口。FindMe 与其他应用保持独立的数据和密钥边界。
 

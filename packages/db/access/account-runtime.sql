@@ -366,6 +366,14 @@ DROP TRIGGER IF EXISTS findme_claim_parent ON claim_revisions;
 
 CREATE TRIGGER findme_claim_parent BEFORE INSERT OR UPDATE OF supersedes_revision_id,claim_id ON claim_revisions FOR EACH ROW EXECUTE FUNCTION public.findme_check_revision_parent();
 
+ALTER TABLE pi_session_archives ENABLE ROW LEVEL SECURITY;
+ALTER TABLE pi_session_archives FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS account_runtime_scope ON pi_session_archives;
+CREATE POLICY account_runtime_scope ON pi_session_archives FOR ALL TO findme_runtime
+ USING (tenant_id::text=current_setting('app.tenant_id',true) AND subject_id::text=current_setting('app.subject_id',true))
+ WITH CHECK (tenant_id::text=current_setting('app.tenant_id',true) AND subject_id::text=current_setting('app.subject_id',true));
+GRANT SELECT,INSERT,UPDATE,DELETE ON pi_session_archives TO findme_runtime;
+
 COMMIT;
 
 -- Do not grant any of these group roles to the existing shared runtime account blindly.

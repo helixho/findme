@@ -1163,3 +1163,18 @@ ALTER TABLE ONLY public.source_blobs
 
 ALTER TABLE ONLY public.specialist_sessions
     ADD CONSTRAINT specialist_sessions_context_source_id_source_items_id_fk FOREIGN KEY (context_source_id) REFERENCES public.source_items(id);
+
+CREATE TABLE public.pi_session_archives (
+ id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+ tenant_id uuid NOT NULL REFERENCES public.tenants(id),
+ subject_id uuid NOT NULL REFERENCES public.subjects(id),
+ conversation_id text NOT NULL,
+ session_id text NOT NULL,
+ revision integer NOT NULL CHECK (revision > 0),
+ fingerprint text NOT NULL,
+ dependencies jsonb NOT NULL,
+ archive jsonb,
+ status text NOT NULL DEFAULT 'available',
+ created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX pi_session_archives_revision_unique ON public.pi_session_archives(tenant_id,subject_id,conversation_id,session_id,revision);

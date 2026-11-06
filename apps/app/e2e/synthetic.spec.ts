@@ -796,7 +796,7 @@ test("a correction still being processed is not reported as done", async ({ page
   expect(keys[1]).toBe(keys[0]);
 });
 
-test("a reply stays visible when its new facts lead to a follow-up question", async ({ page }) => {
+test("new facts remain in chat until understanding is explicitly updated", async ({ page }) => {
   const claim = {
     claim_id: "c-one",
     claim_revision_id: "r-one",
@@ -809,6 +809,7 @@ test("a reply stays visible when its new facts lead to a follow-up question", as
     confidence_basis: "合成。",
   };
   let replied = false;
+  let continued = 0;
   const summary = {
     id: "e5",
     status: "active",
@@ -879,7 +880,8 @@ test("a reply stays visible when its new facts lead to a follow-up question", as
         201,
       ).then(() => true);
     }
-    if (path === "/api/core/explorations/e5/continue")
+    if (path === "/api/core/explorations/e5/continue") {
+      continued++;
       return json(
         route,
         {
@@ -898,13 +900,23 @@ test("a reply stays visible when its new facts lead to a follow-up question", as
         },
         201,
       ).then(() => true);
+    }
     return false;
   });
   await page.getByRole("button", { name: "对话" }).click();
   await page.getByRole("button", { name: "继续", exact: true }).click();
   await page.getByLabel("接着说").fill("后来有进展了。");
   await page.getByRole("button", { name: "发送" }).click();
+  await expect(page.getByText("合成回应：接住进展。")).toBeVisible();
+  await expect(page.getByLabel("接着说")).toBeEnabled();
+  await expect(page.getByText("这次进展改变了什么？")).toHaveCount(0);
+  await expect(
+    page.getByText("补充内容已保存在对话里，尚未单独整理为认识；可以继续聊，也可以按需更新。"),
+  ).toBeVisible();
+  expect(continued).toBe(0);
+  await page.getByRole("button", { name: "更新认识", exact: true }).click();
   await expect(page.getByText("这次进展改变了什么？")).toBeVisible();
+  expect(continued).toBe(1);
   await expect(page.getByText("合成回应：接住进展。")).toBeVisible();
 });
 

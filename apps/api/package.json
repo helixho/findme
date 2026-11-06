@@ -18,6 +18,8 @@
     "owner-account:create": "node --env-file-if-exists=../../.env --import tsx scripts/owner-account.ts"
   },
   "dependencies": {
+    "@earendil-works/pi-ai": "1.5.0",
+    "@earendil-works/pi-coding-agent": "1.5.0",
     "@findme/core": "workspace:*",
     "@findme/db": "workspace:*",
     "@findme/shared": "workspace:*",
@@ -33,10 +35,10 @@
   "devDependencies": {
     "@types/node": "^24.13.2",
     "@types/pg": "8.15.5",
+    "@vitest/coverage-v8": "4.1.12",
     "tsup": "^9.0.0",
     "tsx": "^4.19.0",
     "typescript": "catalog:",
-    "vitest": "catalog:",
-    "@vitest/coverage-v8": "4.1.12"
+    "vitest": "catalog:"
   }
 }

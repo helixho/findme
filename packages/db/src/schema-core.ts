@@ -445,3 +445,36 @@ export const coreOperations = pgTable(
     byStatusLease: index("core_operations_status_lease_idx").on(t.status, t.leaseExpiresAt),
   }),
 );
+
+/** Replayable pi source snapshots; invalidation removes quotation-bearing payloads. */
+export const piSessionArchives = pgTable(
+  "pi_session_archives",
+  {
+    id: id(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id),
+    subjectId: uuid("subject_id")
+      .notNull()
+      .references(() => subjects.id),
+    conversationId: text("conversation_id").notNull(),
+    sessionId: text("session_id").notNull(),
+    revision: integer("revision").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    dependencies: jsonb("dependencies")
+      .$type<Array<{ sourceId: string; fingerprint: string }>>()
+      .notNull(),
+    archive: jsonb("archive").$type<Record<string, unknown>>(),
+    status: text("status").default("available").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    identity: uniqueIndex("pi_session_archives_revision_unique").on(
+      t.tenantId,
+      t.subjectId,
+      t.conversationId,
+      t.sessionId,
+      t.revision,
+    ),
+  }),
+);

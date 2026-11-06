@@ -127,7 +127,9 @@ Life Structure 不预置“健康/事业/家庭”等固定人生清单；它描
 
 方法 Skill 是版本化的方法资产：引用来源、适用条件、操作步骤、产物规则与反例；不是个人 Claim，也不代替 FrameworkDefinitionVersion 或计分规则。方法蒸馏保留参考来源和采用/改写边界，不把满意样例中的私人结论转为通用规则。
 
-Agent 运行记录按 GenerationRecord/现有任务元数据扩展，关联实际使用的 context、skill/reference、tool contract、harness、policy、model 与 validator 版本及来源/修订指纹。版本须可还原实际内容；不把每个版本名新增成独立领域表。会话和压缩摘要属于派生执行状态，不能重复计证；来源失效及删除传播同样覆盖其中的私人派生文字，恢复不能绕过资格复核。
+pi 会话也是来源：以 Profile、来源会话 ID、条目 ID 与版本关联归档，保存角色、顺序与问答关联；与测试、评论和导入来源并存，不因同步重复计证。
+
+Agent 运行记录按 GenerationRecord/现有任务元数据扩展，关联实际使用的 context、skill/reference、tool contract、harness、policy、model 与 validator 版本及来源/修订指纹。版本须可还原实际内容；不把每个版本名新增成独立领域表。会话运行检查点和压缩摘要属于派生执行状态，不能重复计证；来源失效及删除传播同样覆盖其中的私人派生文字，恢复不能绕过资格复核。
 
 ### 3.5 诊断运行与报告版本
 

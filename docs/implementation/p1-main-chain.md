@@ -2,7 +2,7 @@
 
 > 本文是[交付计划](diagnostic-product-plan.md)工作包 2 的产品侧差异设计，以及工作包 4 首条主链的实现契约。依据为[第一阶段范围](../delivery/phase-1-personal-understanding.md)与 [ADR D26](../adr.md#d26-对话使用-core-当前认识并自动处理新输入)。实际实现见 [As-Is](../as-is.md)，不在此保存测试数字或部署状态。
 
-> 本文记录既有主链的具体实现契约。新的多步取证和方法执行按[Agent 设计](personal-understanding-agent.md)与[工作计划](../delivery/agent-work-plan.md)适配；下文固定步骤和调用上限继续描述原实现，不是新 harness 的强制执行形式。来源、版本、修订与实际预算要求继续有效。
+> 本文记录既有主链的具体实现契约。新的多步取证和方法执行按[Agent 设计](personal-understanding-agent.md)与[工作计划](../delivery/agent-work-plan.md)适配；下文固定步骤和调用上限继续描述原实现，不是新 harness 的强制执行形式。当前路线以持续 session 与历史原文为主，普通新信息不自动触发认识综合；明确纠正、停用和按需综合仍由既有领域服务承接。来源、版本、修订与实际预算要求继续有效。
 
 ## 1. 要解决的断点
 

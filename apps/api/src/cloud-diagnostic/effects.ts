@@ -10,6 +10,21 @@ export async function invalidateCloudSources(
   hard = false,
 ) {
   if (!ids.length) return { reports: 0, jobs: 0 };
+  // Snapshots contain tool results and compressed quotations as well as messages.
+  // Exclusion and hard deletion both clear every matching historical revision.
+  await tx
+    .update(c.piSessionArchives)
+    .set({ archive: null, status: "stale" })
+    .where(
+      and(
+        eq(c.piSessionArchives.tenantId, ctx.tenantId),
+        eq(c.piSessionArchives.subjectId, ctx.subjectId),
+        sql`exists (select 1 from jsonb_array_elements(${c.piSessionArchives.dependencies}) d where d->>'sourceId' in (${sql.join(
+          ids.map((id) => sql`${id}`),
+          sql`, `,
+        )}))`,
+      ),
+    );
   const links = await tx
     .select()
     .from(d.diagnosticReportSources)
