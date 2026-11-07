@@ -33,7 +33,11 @@ import {
   decodePiReview,
 } from "../src/personal-understanding/pi-conversation.js";
 import type { PiSessionArchive } from "../src/personal-understanding/pi-runtime.js";
-import { reviewSegments } from "../src/personal-understanding/review-edits.js";
+import {
+  assertReplyLength,
+  replyLengthLimit,
+  reviewSegments,
+} from "../src/personal-understanding/review-edits.js";
 import { accountCoreModelRoutes } from "../src/routes/account-core-model.js";
 
 const final = (reply: string) =>
@@ -58,7 +62,13 @@ function reviewPayload(context: TranscriptContext): { candidate_reply: string } 
           .join("");
   try {
     const parsed = JSON.parse(text);
-    return typeof parsed.candidate_reply === "string" ? parsed : undefined;
+    return Array.isArray(parsed.candidate_segments)
+      ? {
+          candidate_reply: parsed.candidate_segments
+            .map((s: { text: string }) => s.text)
+            .join("\n"),
+        }
+      : undefined;
   } catch {
     return undefined;
   }
@@ -85,7 +95,11 @@ function responses(
                   operation: index === 0 ? "replace" : "delete",
                   ...(index === 0 ? { replacement: reply } : {}),
                   reason: "仅保留本人原话支持的范围。",
-                  basis: { kind: "evidence" },
+                  basis: {
+                    kind: "reasoning_error",
+                    premise: segment.text,
+                    error: "此句把无依据的推论作为事实。",
+                  },
                 })),
         }),
       );
@@ -857,7 +871,7 @@ it("applies only identified edits and records the actual before/after without no
           operation: "replace",
           replacement: "有限观察。",
           reason: "原话只支持此范围。",
-          basis: { kind: "evidence" },
+          basis: { kind: "reasoning_error", premise: "原观察。", error: "超出了观察范围。" },
         },
       ],
     }),
@@ -877,7 +891,7 @@ it("applies only identified edits and records the actual before/after without no
           target_id: target?.id,
           operation: "delete",
           reason: "无据判断。",
-          basis: { kind: "evidence" },
+          basis: { kind: "reasoning_error", premise: "原观察。", error: "超出了观察范围。" },
         },
       ],
     }),
@@ -893,7 +907,7 @@ it("rejects conflicting, ineffective, ungrounded constraint and whole-reply revi
     operation: "replace",
     replacement: "修正。",
     reason: "范围过宽。",
-    basis: { kind: "evidence" },
+    basis: { kind: "reasoning_error", premise: "原观察。", error: "超出了观察范围。" },
   };
   for (const value of [
     { reply: "偷偷重写", edits: [] },
@@ -903,7 +917,12 @@ it("rejects conflicting, ineffective, ungrounded constraint and whole-reply revi
     { edits: [{ ...edit, replacement: "  " }] },
     {
       edits: [
-        { target_id: "b1", operation: "delete", reason: "全删", basis: { kind: "evidence" } },
+        {
+          target_id: "b1",
+          operation: "delete",
+          reason: "全删",
+          basis: { kind: "reasoning_error", premise: "原观察。", error: "超出了观察范围。" },
+        },
       ],
     },
     { edits: [{ ...edit, operation: "delete" }] },
@@ -920,12 +939,19 @@ it("rejects conflicting, ineffective, ungrounded constraint and whole-reply revi
     ...edit,
     basis: { kind: "user_constraint", quote: "先问一道两选题", scope: "current_turn" },
   };
-  expect(
+  expect(() =>
     decodePiReview(JSON.stringify({ edits: [constraint] }), "原观察。", {
       current: "先问一道两选题",
       history: [],
-    }).audit.applied_edits[0]?.basis.kind,
-  ).toBe("user_constraint");
+    }),
+  ).toThrow("PI_REPLY_FORMAT_INVALID");
+  const layout = { ...constraint, replacement: "**原观察。**" };
+  expect(
+    decodePiReview(JSON.stringify({ edits: [layout] }), "原观察。", {
+      current: "先问一道两选题",
+      history: [],
+    }).reply,
+  ).toBe("**原观察。**");
   expect(() =>
     decodePiReview(JSON.stringify({ edits: [constraint] }), "原观察。", {
       current: "B",
@@ -1323,9 +1349,22 @@ it("does not report cancelling adjacent edits as changes to the delivered text",
           operation: "replace",
           replacement: candidate,
           reason: "合并",
-          basis: { kind: "evidence" },
+          basis: {
+            kind: "reasoning_error",
+            premise: reviewSegments(candidate)[0]!.text,
+            error: "合并重复内容。",
+          },
         },
-        { target_id: "b2", operation: "delete", reason: "已合并", basis: { kind: "evidence" } },
+        {
+          target_id: "b2",
+          operation: "delete",
+          reason: "已合并",
+          basis: {
+            kind: "reasoning_error",
+            premise: reviewSegments(candidate)[1]!.text,
+            error: "合并重复内容。",
+          },
+        },
       ],
     }),
     candidate,
@@ -1392,6 +1431,113 @@ it("does not revive a legacy reply's withdrawn knowledge in the pi conversation"
     expect((await request(f, afterInput)).status).toBe(201);
     expect(after).not.toContain("LEGACY_REPLY_FROM_WITHDRAWABLE_KNOWLEDGE");
     expect(after).not.toContain(preference.text);
+  } finally {
+    await f.close();
+  }
+});
+
+it("counts the full displayed response and rejects length-only substantive review edits", () => {
+  expect(replyLengthLimit("请在１８０字内回答")).toBe(180);
+  expect(replyLengthLimit("最多120字，不再提问")).toBe(120);
+  expect(replyLengthLimit("预算180元，时长45分钟")).toBeNull();
+  expect(() => assertReplyLength("标点。😀", 4)).not.toThrow();
+  expect(() => assertReplyLength("标题\n标点。😀", 6)).toThrow("PI_REPLY_LENGTH_EXCEEDED");
+  const value = {
+    edits: [
+      {
+        target_id: "b1",
+        operation: "replace",
+        replacement: "只认可部分。",
+        reason: "缩短篇幅",
+        basis: { kind: "user_constraint", quote: "180字内", scope: "current_turn" },
+      },
+    ],
+  };
+  expect(() =>
+    decodePiReview(JSON.stringify(value), "认可完整描述。", { current: "180字内", history: [] }),
+  ).toThrow("PI_REPLY_FORMAT_INVALID");
+  value.edits[0]!.basis = { kind: "evidence", quote: "不存在的原话", error: "冲突" } as never;
+  expect(() =>
+    decodePiReview(JSON.stringify(value), "认可完整描述。", { current: "180字内", history: [] }),
+  ).toThrow("PI_REPLY_FORMAT_INVALID");
+});
+
+it("compresses once within the same context then checks review and delivered length", async () => {
+  const f = await fixture();
+  try {
+    const thread = await conversation(f.db, f.ctx, "合成意愿：我不愿接夜班。20字内，不提问。");
+    let compressionContext = "";
+    responses(f, [
+      final("这是一份超过二十个字的合成草稿，明确表示不愿意，但实际是否接班仍然未知。"),
+      (context) => {
+        compressionContext = JSON.stringify(context);
+        return final("你不愿接夜班，实际是否接班未知。");
+      },
+    ]);
+    const response = await request(f, thread);
+    expect(response.status).toBe(201);
+    const accepted = await response.json();
+    expect(Array.from(accepted.reply).length).toBeLessThanOrEqual(20);
+    expect(compressionContext).toContain("我不愿接夜班");
+    expect(compressionContext).toContain("上一份草稿尚未交付");
+  } finally {
+    await f.close();
+  }
+});
+
+it.each(["draft", "compression", "review"])(
+  "never publishes truncated %s and retains the original pending input",
+  async (stage) => {
+    const f = await fixture();
+    try {
+      const thread = await conversation(f.db, f.ctx, "合成测试。20字内。");
+      const truncated = fauxAssistantMessage(stage === "review" ? '{"edits":[' : "未完成草稿", {
+        stopReason: "length",
+      });
+      if (stage === "draft") f.provider.setResponses([truncated]);
+      else if (stage === "compression")
+        f.provider.setResponses([final("超长合成草稿。".repeat(10)), truncated]);
+      else f.provider.setResponses([final("短草稿。"), truncated]);
+      expect((await request(f, thread)).status).toBe(502);
+      const { getExplorationView } = await import("../src/core/exploration-views.js");
+      const view = await withProfileTransaction(f.db, f.ctx, (tx) =>
+        getExplorationView(tx as never, f.ctx, thread.id),
+      );
+      expect(view.turns.filter((turn) => turn.role === "assistant")).toHaveLength(0);
+      expect(view.pending.messages.some((message) => message.source_id === thread.sourceId)).toBe(
+        true,
+      );
+      let retryInput = "";
+      responses(f, [
+        (context) => {
+          retryInput = JSON.stringify(context);
+          return final("完整重试回应。");
+        },
+      ]);
+      expect((await request(f, thread)).status).toBe(201);
+      expect(retryInput).toContain("合成测试。20字内。");
+      expect(retryInput).not.toContain("未完成草稿");
+      expect(retryInput).not.toContain("上一份草稿尚未交付");
+    } finally {
+      await f.close();
+    }
+  },
+);
+
+it("rejects a review that expands a compliant draft beyond the final display limit", async () => {
+  const f = await fixture();
+  try {
+    const thread = await conversation(f.db, f.ctx, "合成测试：20字内。");
+    responses(f, [final("原观察。")], () => "超出篇幅的替换。".repeat(8));
+    expect((await request(f, thread)).status).toBe(502);
+    const { getExplorationView } = await import("../src/core/exploration-views.js");
+    const view = await withProfileTransaction(f.db, f.ctx, (tx) =>
+      getExplorationView(tx as never, f.ctx, thread.id),
+    );
+    expect(view.turns.filter((turn) => turn.role === "assistant")).toHaveLength(0);
+    expect(view.pending.messages.some((message) => message.source_id === thread.sourceId)).toBe(
+      true,
+    );
   } finally {
     await f.close();
   }

@@ -21,7 +21,20 @@ export function reviewSegments(candidate: string): ReviewSegment[] {
 }
 
 const Basis = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("evidence") }).strict(),
+  z
+    .object({
+      kind: z.literal("evidence"),
+      quote: z.string().trim().min(1).max(600),
+      error: z.string().trim().min(1).max(240),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("reasoning_error"),
+      premise: z.string().trim().min(1).max(600),
+      error: z.string().trim().min(1).max(240),
+    })
+    .strict(),
   z
     .object({
       kind: z.literal("user_constraint"),
@@ -32,7 +45,7 @@ const Basis = z.discriminatedUnion("kind", [
 ]);
 const Shared = {
   target_id: z.string().regex(/^b[1-9]\d*$/),
-  reason: z.string().trim().min(1).max(400),
+  reason: z.string().trim().min(1).max(120),
   basis: Basis,
 };
 const Edit = z.discriminatedUnion("operation", [
@@ -52,7 +65,10 @@ const fingerprint = (text: string) => createHash("sha256").update(text).digest("
 export function decodePiReview(
   output: string,
   candidate: string,
-  userText: { current: string; history: readonly string[] } = { current: "", history: [] },
+  userText: { current: string; history: readonly string[]; evidence?: readonly string[] } = {
+    current: "",
+    history: [],
+  },
 ) {
   try {
     const parsed = Review.parse(
@@ -77,6 +93,19 @@ export function decodePiReview(
           throw new Error("constraint quote absent from user input");
       }
       const after = edit.operation === "delete" ? "" : edit.replacement;
+      if (edit.basis.kind === "evidence") {
+        const originals = [userText.current, ...userText.history, ...(userText.evidence ?? [])];
+        const quote = edit.basis.quote;
+        if (!originals.some((text) => text.includes(quote)))
+          throw new Error("evidence quote absent from visible context");
+      }
+      if (edit.basis.kind === "reasoning_error" && !target.text.includes(edit.basis.premise))
+        throw new Error("reasoning premise absent from target");
+      // Presentation constraints may change layout, never the words of a judgment.
+      // Substantive changes need their own evidence or a located reasoning error.
+      const words = (text: string) => text.replace(/[\s*_`]/gu, "");
+      if (edit.basis.kind === "user_constraint" && words(target.text) !== words(after))
+        throw new Error("presentation constraint changes substance");
       if (after === target.text) throw new Error("edit has no effect");
       return {
         target_id: target.id,
@@ -117,7 +146,8 @@ export function decodePiReview(
     return {
       reply,
       audit: {
-        format: "findme-review-edits@1",
+        format: "findme-review-edits@2",
+        validation: "structure_and_locations_only",
         candidate_sha256: fingerprint(candidate),
         result_sha256: fingerprint(reply),
         applied_edits: applied,
@@ -127,4 +157,29 @@ export function decodePiReview(
   } catch {
     throw new Error("PI_REPLY_FORMAT_INVALID");
   }
+}
+
+/** Count every displayed code point, including punctuation, spaces and Markdown. */
+export function replyLengthLimit(current: string): number | null {
+  const matches = [
+    ...current
+      .normalize("NFKC")
+      .matchAll(
+        /(?:不超过|最多|至多|限于|控制在)?\s*(\d{1,5})\s*字(?:以?内|以下)|(?:不超过|最多|至多)\s*(\d{1,5})\s*字/g,
+      ),
+  ];
+  const limits = matches.map((match) => Number(match[1] ?? match[2])).filter((limit) => limit > 0);
+  return limits.length ? Math.min(...limits) : null;
+}
+export function assertReplyLength(reply: string, limit: number | null) {
+  if (limit !== null && Array.from(reply).length > limit)
+    throw new Error("PI_REPLY_LENGTH_EXCEEDED");
+}
+
+/** Collect exact visible text values, without treating serialized JSON escapes as quotes. */
+export function reviewEvidenceTexts(value: unknown): string[] {
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) return value.flatMap(reviewEvidenceTexts);
+  if (value && typeof value === "object") return Object.values(value).flatMap(reviewEvidenceTexts);
+  return [];
 }

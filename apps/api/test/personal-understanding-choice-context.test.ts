@@ -80,3 +80,13 @@ describe("explicit choice context", () => {
     ).toEqual([]);
   });
 });
+
+it("preserves conditions outside the extracted question paragraph", () => {
+  const content = "两种安排均无经济损失，而且可随时退出。\n\n只比较意愿：\nA. 想加入\nB. 不想加入";
+  const [binding] = deriveChoiceBindings([
+    { id: "q", role: "assistant", content },
+    { id: "a", role: "user", content: "B" },
+  ]);
+  expect(binding?.question_context).toBe(content);
+  expect(binding?.selected_labels).toEqual(["B"]);
+});

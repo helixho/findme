@@ -71,6 +71,7 @@ export type ChoiceBinding = {
   question_source_id: string | null;
   question_role: "assistant";
   question_text: string;
+  question_context: string;
   question_spans: Array<{ start: number; end: number; text: string }>;
   options: ChoiceOptionSpan[];
   selected_labels: string[];
@@ -145,6 +146,7 @@ export function deriveChoiceBindings(turns: readonly ChoiceBindingTurn[]): Choic
       question_source_id: question.sourceItemId ?? null,
       question_role: "assistant",
       question_text: questionSpans.map((span) => span.text).join("\n"),
+      question_context: question.content,
       question_spans: questionSpans,
       options,
       selected_labels: labels,
