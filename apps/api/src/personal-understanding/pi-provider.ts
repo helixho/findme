@@ -84,7 +84,6 @@ export async function createFindMePiProvider(options: {
   model: string;
   limits: PiProviderLimits;
   reasoningEffort?: () => "low" | undefined;
-  outputTokenLimit?: () => number;
   recordPayload: (record: PiProviderPayloadRecord) => unknown | Promise<unknown>;
 }) {
   const baseUrl = validatePiOpenRouterEndpoint(options.baseUrl);
@@ -128,17 +127,10 @@ export async function createFindMePiProvider(options: {
         onPayload: async (raw) => {
           if (failure) throw failure;
           try {
-            const outputLimit = options.outputTokenLimit?.() ?? limits.maxOutputTokens;
-            if (
-              !Number.isSafeInteger(outputLimit) ||
-              outputLimit <= 0 ||
-              outputLimit > limits.maxOutputTokens
-            )
-              throw new Error("PI_OUTPUT_LIMIT_REACHED");
             const payload: Record<string, unknown> = {
               ...(raw as Record<string, unknown>),
               model: options.model,
-              max_tokens: outputLimit,
+              max_tokens: limits.maxOutputTokens,
               provider: {
                 require_parameters: true,
                 max_price: {

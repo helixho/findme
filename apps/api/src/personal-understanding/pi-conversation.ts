@@ -366,10 +366,6 @@ export function createPiReplyHandler(options: PiConversationOptions): PiReplyHan
       const provider = await (options.createProvider ?? createFindMePiProvider)({
         ...options.provider,
         reasoningEffort: () => (reviewing || compacting ? "low" : undefined),
-        outputTokenLimit: () =>
-          reviewing
-            ? Math.min(4096, options.provider.limits.maxOutputTokens)
-            : options.provider.limits.maxOutputTokens,
         recordPayload: checkpoint,
       });
       const [system, catalog, preparedMethods] = await Promise.all([
