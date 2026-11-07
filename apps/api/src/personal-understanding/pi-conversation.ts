@@ -365,7 +365,7 @@ export function createPiReplyHandler(options: PiConversationOptions): PiReplyHan
       let compacting = false;
       const provider = await (options.createProvider ?? createFindMePiProvider)({
         ...options.provider,
-        reasoningEffort: () => (reviewing || compacting ? "low" : undefined),
+        reasoningEffort: () => (reviewing ? "none" : compacting ? "low" : undefined),
         recordPayload: checkpoint,
       });
       const [system, catalog, preparedMethods] = await Promise.all([

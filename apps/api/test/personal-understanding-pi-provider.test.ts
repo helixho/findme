@@ -120,7 +120,7 @@ it("sends a bounded tool-capable OpenRouter payload through the real adapter usi
     apiKey: "synthetic-secret",
     model: "synthetic/model",
     limits,
-    reasoningEffort: () => (reviewing ? "low" : undefined),
+    reasoningEffort: () => (reviewing ? "none" : undefined),
     recordPayload: async (record) => {
       records.push(record);
     },
@@ -162,7 +162,7 @@ it("sends a bounded tool-capable OpenRouter payload through the real adapter usi
     { fetch },
   );
   provider.assertHealthy();
-  expect(sent?.reasoning).toEqual({ effort: "low" });
+  expect(sent?.reasoning).toEqual({ effort: "none" });
   expect(fetch).toHaveBeenCalledTimes(2);
   expect(provider.usage().requests).toBe(2);
   expect(records).toHaveLength(2);

@@ -83,7 +83,7 @@ export async function createFindMePiProvider(options: {
   apiKey: string;
   model: string;
   limits: PiProviderLimits;
-  reasoningEffort?: () => "low" | undefined;
+  reasoningEffort?: () => "low" | "none" | undefined;
   recordPayload: (record: PiProviderPayloadRecord) => unknown | Promise<unknown>;
 }) {
   const baseUrl = validatePiOpenRouterEndpoint(options.baseUrl);
